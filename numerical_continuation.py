@@ -27,8 +27,8 @@ def estimate_initial_continuation_vector(continuation_obj, parameter, period, in
     def ode(t, y):
         return continuation_obj.ode_RHS(y, parameter)
     soln = scipy.integrate.solve_ivp(ode, [0, period], initial_cond, dense_output=True).sol
-    coeffs_list = soln(period * continuation_obj.col_func.mesh.full_mesh).T
-    target_shape = (continuation_obj.col_func.mesh.n_subintervals, -1, coeffs_list.shape[1])
+    coeffs_list = soln(period * continuation_obj.col_func.full_mesh).T
+    target_shape = (continuation_obj.col_func.n_subintervals, -1, coeffs_list.shape[1])
     coeffs_list.reshape(target_shape)
     return np.hstack((parameter, period, coeffs_list.reshape(-1)))
 
@@ -75,8 +75,7 @@ def solver(sys, x0):
 
 
 def main():
-    mesh = collocation.CollocationMesh(MESH_SIZE, POLYNOMIAL_ORDER)
-    krogh = collocation.KroghCollocationFunction(mesh)
+    krogh = collocation.KroghMesh(MESH_SIZE, POLYNOMIAL_ORDER)
     continuer = collocation.NumericalContinuation(hopf, krogh)
 
     initial_vec_1 = estimate_initial_continuation_vector(continuer, INITIAL_PARS[0], 6.2, [0, np.sqrt(INITIAL_PARS[0])])

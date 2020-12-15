@@ -9,15 +9,12 @@ FTOL = 1e-6
 # TODO adapt to nonautonymous systems?
 
 
-class CollocationMesh:
+class CollocationMesh(abc.ABC):
     """
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs
-
-    Holds useful information about collocation meshs. Contains a list
-    of subintervals, with collocation basis functions being defined
-    across each subinterval.
+    Allows computation on collocation meshs. Contains a list of
+    subintervals, with collocation basis functions being defined
+    across each subinterval. Implementations of the CollocationMesh
+    abstract class define these basis functions.
 
         mesh : 1d array
             List of evenly spaced timepoints that separate up the unit
@@ -40,12 +37,6 @@ class CollocationMesh:
             Shape of the collocation mesh.
 
         # TODO other class attributes
-
-        __getitem__ :
-            Entry point to the sub_intervals list.
-
-        __iter__ :
-            Entry point to iterating over subintervals.
     """
 
     class CollocationSubinterval:
@@ -62,10 +53,6 @@ class CollocationMesh:
             collocation_points : 1d array
                 Legendre-root collocation points within the
                 subinterval.
-
-            __contains__ :
-                Returns True if a point is within the subinterval, and
-                False otherwise. Acts element-wise on numpy arrays.
         """
 
         def __init__(self, boundary_lo, boundary_hi, roots):
@@ -112,27 +99,6 @@ class CollocationMesh:
             ] = subinterval.collocation_points
             self.full_mesh[i * (order + 1) : (i + 1) * (order + 1)] = subinterval.mesh
 
-    def __getitem__(self, key):
-        return self.sub_intervals[key]
-
-    def __iter__(self):
-        return self.sub_intervals.__iter__()
-
-
-class CollocationFunction(abc.ABC):
-    """
-    TODO
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs
-    """
-
-    def __init__(self, mesh):
-        """
-            mesh : instance of CollocationMesh
-        """
-        self.mesh = mesh
-
     def eval(self, coefficients, ts=None):
         """
         Evaluate the user-defined collocation function. If timepoints
@@ -151,14 +117,14 @@ class CollocationFunction(abc.ABC):
                 None, the collocation points are used.
         """
         if ts is None:
-            ts = self.mesh.collocation_points
+            ts = self.collocation_points
         try:
             out_size = (ts.size, coefficients[0, 0, :].size)
         except AttributeError:
             out_size = (1, coefficients[0, 0, :].size)
             ts = np.array([ts])
         output = np.zeros(out_size)
-        for subinterval, coeffs in zip(self.mesh, coefficients):
+        for subinterval, coeffs in zip(self.sub_intervals, coefficients):
             output[subinterval.in_subinterval(ts)] = self._eval(
                 subinterval.mesh, coeffs, ts[subinterval.in_subinterval(ts)]
             )
@@ -183,32 +149,32 @@ class CollocationFunction(abc.ABC):
                 None, the collocation points are used.
         """
         if ts is None:
-            ts = self.mesh.collocation_points
+            ts = self.collocation_points
         try:
             out_size = (ts.size, coefficients[0, 0, :].size)
         except AttributeError:
             out_size = (1, coefficients[0, 0, :].size)
             ts = np.array([ts])
         output = np.zeros(out_size)
-        for subinterval, coeffs in zip(self.mesh, coefficients):
+        for subinterval, coeffs in zip(self.sub_intervals, coefficients):
             output[subinterval.in_subinterval(ts)] = self._derivative(
                 subinterval.mesh, coeffs, ts[subinterval.in_subinterval(ts)]
             )
         return output
 
-    def approximate_remesh(self, mesh, coefficients):
-        # TODO come up with a new set of coefficients, appropriate for
-        # the new mesh; useful for adaptive methods; the output should
-        # be corrected using a solver, and hence the re-meshing is
-        # only approximate
-        raise NotImplementedError
+    @abc.abstractmethod
+    def remesh(self, mesh_size, order, coefficients):
+        """
+        TODO Come up with a new mesh object and list of coefficients,
+        appropriate for the new mesh parameters. Useful for adaptive
+        methods. The output coefficients should be corrected using a
+        solver, and hence the re-meshing is only an approximate
+        operation.
+        """
         pass
 
     @abc.abstractmethod
     def _eval(self, submesh, coefficients, ts):
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs
         """
         User-implemented. Evaluate the user-defined collocation
         function, for a set of basis funciton coefficients, at a set
@@ -232,9 +198,6 @@ class CollocationFunction(abc.ABC):
 
     @abc.abstractmethod
     def _derivative(self, submesh, coefficients, ts):
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs
         """
         User-implemented. Evaluate the time-derivative of the
         user-defined collocation function, for a set of basis funciton
@@ -258,24 +221,22 @@ class CollocationFunction(abc.ABC):
         pass
 
 
-class KroghCollocationFunction(CollocationFunction):
+class KroghMesh(CollocationMesh):
+    def __init__(self, mesh_size, order):
+        super().__init__(mesh_size, order)
+        # TODO precompute interpolants at init, then select
+        # appropriate sets of basis functions at runtime, to avoid
+        # recomputing interpolants every single time the mesh is
+        # evaluated
+
     def _eval(self, submesh, coefficients, ts):
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs. Goal: mesh is
-        # an ABC, which requires the _eval, _derivative funcs to be
-        # implemented. Mesh then constructs relevant interpolators on
-        # each interval at __init__
         return scipy.interpolate.krogh_interpolate(submesh, coefficients, ts)
 
     def _derivative(self, submesh, coefficients, ts):
-        # TODO refactor so that the meshs implement their basis
-        # functions, to avoid having to recompute interpolants every
-        # time, and to facilitate easy adaptive meshs. Goal: mesh is
-        # an ABC, which requires the _eval, _derivative funcs to be
-        # implemented. Mesh then constructs relevant interpolators on
-        # each interval at __init__
         return scipy.interpolate.krogh_interpolate(submesh, coefficients, ts, der=1)
+
+    def remesh(self, mesh_size, order, coefficients):
+        raise NotImplementedError
 
 
 class NumericalContinuation(continuation.Continuation):
@@ -298,14 +259,14 @@ class NumericalContinuation(continuation.Continuation):
 
     def get_discretisation(self, continuation_vec):
         return np.array(continuation_vec[2:]).reshape(
-            (self.col_func.mesh.n_subintervals, self.col_func.mesh.order + 1, -1)
+            (self.col_func.n_subintervals, self.col_func.order + 1, -1)
         )
 
     def _continuation_system(
         self, continuation_vector, last_solution, prediction, secant
     ):
         """
-
+        TODO
         """
         last_coefficients = self.get_discretisation(last_solution)
 
@@ -359,20 +320,20 @@ class NumericalContinuation(continuation.Continuation):
         Returns a TODO dimensional array representing the difference
         between each adjacent polynomial section at the boundaries.
         """
-        out_size = (self.col_func.mesh.size - 1, coefficients[0, 0, :].size)
+        out_size = (self.col_func.size - 1, coefficients[0, 0, :].size)
         errors = np.zeros(out_size)
-        for i in range(self.col_func.mesh.n_subintervals):
+        for i in range(self.col_func.n_subintervals):
             # Evaluate last polynomial at last meshpoint, not first
-            RHS_meshpoint = 1 if i == 0 else self.col_func.mesh.mesh[i]
+            RHS_meshpoint = 1 if i == 0 else self.col_func.mesh[i]
             RHS = self.col_func._eval(
-                self.col_func.mesh.sub_intervals[i - 1].mesh,
+                self.col_func.sub_intervals[i - 1].mesh,
                 coefficients[i - 1],
                 RHS_meshpoint,
             )
             LHS = self.col_func._eval(
-                self.col_func.mesh.sub_intervals[i].mesh,
+                self.col_func.sub_intervals[i].mesh,
                 coefficients[i],
-                self.col_func.mesh.mesh[i],
+                self.col_func.mesh[i],
             )
             errors[i] = LHS - RHS
         return errors
