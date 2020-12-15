@@ -81,17 +81,11 @@ def get_amplitude(discretisation):
     return f0_amplitude
 
 
-class DuffingContinuation(continuation.NonAutonymousContinuation):
+class DuffingContinuation(continuation.ControlBasedContinuation):
     """ TODO comments """
-
-    def get_parameter(self, continuation_vec):
-        return continuation_vec[0]
 
     def get_period(self, continuation_vec):
         return 2 * np.pi / continuation_vec[0]
-
-    def get_discretisation(self, continuation_vec):
-        return continuation_vec[1:]
 
 
 def main():
@@ -108,10 +102,11 @@ def main():
             build_continuation_vector(signal_1, discretisor, par_1),
         ]
 
-        # Run continuation
+        solver = lambda sys, x0: continuation.newton_solver(
+            sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
+        )
         continuation_vectors, message = continuer.run_continuation(
-            starters, convergence_criteria, stepsize=STEPSIZE, par_range=[0.5, 2], max_iters=100,
-            finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE,
+            starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
         )
         print(message)
         results.append(continuation_vectors)

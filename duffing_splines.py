@@ -107,24 +107,29 @@ def get_amplitude(discretisation, discretisor):
     model = discretisor.undiscretise(discretisation, 1)
     ts = np.linspace(0, 1, 1000)
     ys = model(ts)
-    return (np.max(ys) - np.min(ys))/2
+    return (np.max(ys) - np.min(ys)) / 2
 
 
-class DuffingContinuation(continuation.NonAutonymousContinuation):
-    """ TODO comments """
-
-    def get_parameter(self, continuation_vec):
-        return continuation_vec[0]
-
+class DuffingContinuation(continuation.ControlBasedContinuation):
     def get_period(self, continuation_vec):
         return 2 * np.pi / continuation_vec[0]
-
-    def get_discretisation(self, continuation_vec):
-        return continuation_vec[1:]
 
 
 def main():
     results = []
+    solver = lambda sys, x0: continuation.newton_solver(
+        sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
+    )
+
+    """ SCIPY SOLVER """
+    # def solver(sys, x0):
+    #     solution = scipy.optimize.root(sys, x0, tol=1e-6)
+    #     print("Solution vector: ", solution.x)
+    #     print("Solution value: ", solution.fun)
+    #     print("Parameter: ", solution.x[0])
+    #     if solution.success:
+    #         return solution.x
+    #     return None
 
     for par_0, par_1 in STARTER_PARAMS:
         signal_0 = blackbox_system(None, par_0)
@@ -137,29 +142,7 @@ def main():
         ]
         continuer = DuffingContinuation(blackbox_system, discretisor)
 
-        """ OLD CONTINUATION API """
-        # Run continuation
-        # continuation_vectors, message = continuer.run_continuation(
-        #     starters,
-        #     convergence_criteria,
-        #     stepsize=STEPSIZE,
-        #     par_range=[0.5, 2],
-        #     max_iters=100,
-        #     finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE,
-        # )
-
-        """ SCIPY SOLVER """
-        # def solver(sys, x0):
-        #     solution = scipy.optimize.root(sys, x0, tol=1e-6)
-        #     print("Solution vector: ", solution.x)
-        #     print("Solution value: ", solution.fun)
-        #     print("Parameter: ", solution.x[0])
-        #     if solution.success:
-        #         return solution.x
-        #     return None
-
-        solver = lambda sys, x0: continuation.newton_solver(sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE)
-        continuation_vectors, message = continuer.new_run_continuation(
+        continuation_vectors, message = continuer.run_continuation(
             starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
         )
         print(message)
