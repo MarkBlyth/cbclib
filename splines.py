@@ -3,109 +3,10 @@ import warnings
 import numpy as np
 
 
-"""
-TODO remove redunancies between Generic and Periodic helper functions.
-"""
-
-
-class GenericPeriodicSpline:
-    """
-    OOP interface to generic periodic spline modelling. Period is
-    determined automatically from the provided start and end points, a
-    and b. The resulting spline model is (b-a)--periodic. This differs
-    from the other periodic splines class, which is strictly
-    1-periodic.
-    """
-
-    def __init__(self, knots, a, b):
-        """
-        given a set of interior knots, initialise an appropriate set
-        of BSpline basis functions, as required to give a periodic
-        spline model. Boundary knots (ie. a, b) must not be provided.
-        knots must be sorted into ascending order. cubic spline knots
-        are assumed, meaning at least three interior knots must be
-        provided.
-
-            knots : 1d array
-                1d array of interior knots, sorted from smallest to
-                largest
-
-            a, b : float
-                Boundary points
-        """
-        self.BSplines = _get_periodic_cubic_BSplines(knots, a, b)
-        self.derivative_BSplines = _get_periodic_cubic_BSpline_derivatives(knots, a, b)
-        self._a = a
-        self._b = b
-
-    def fit(self, data_t, data_y):
-        """
-        Compute the BSpline coefficients that specify a periodic
-        BSpline curve, for the knot set provided at initialisation.
-
-            data_t, data_y : 1d array
-                t data (independent variable), y data (dependent variable)
-                to fit a splines model to
-
-        Returns a list of the coefficients of the fitted spline model. The
-        last three coefficients are ommitted, as they are equal to the
-        first three coefficients.
-        """
-        return _fit_periodic_bspline_coefficients(
-            self.BSplines, data_t, data_y, self._a, self._b
-        )
-
-    def evaluate_derivative(self, data_t, coefficients):
-        """
-        Given a set of time points and BSpline coefficients, evaluate
-        the time-derivative of the spline curve at the specified time
-        points.
-
-            coefficients : 1d array
-                Array of BSpline coefficients, eg. as returned by the
-                fit method. No checking is performed on these.
-
-            data_t : 1d array
-                Array of timepoints at which to evaluate the spline curve.
-        """
-        return _evaluate_periodic_spline_curve(
-            self.derivative_BSplines, data_t, coefficients, self._a, self._b
-        )
-
-    def eval(self, data_t, coefficients):
-        """
-        Given a set of time points and BSpline coefficients, evaluate
-        the spline curve at the specified time points.
-
-            coefficients : 1d array
-                Array of BSpline coefficients, eg. as returned by the
-                fit method. No checking is performed on these.
-
-            data_t : 1d array
-                Array of timepoints at which to evaluate the spline curve.
-        """
-        return _evaluate_periodic_spline_curve(
-            self.BSplines, data_t, coefficients, self._a, self._b
-        )
-
-    def __call__(self, data_t, coefficients):
-        """
-        Given a set of time points and BSpline coefficients, evaluate
-        the spline curve at the specified time points.
-
-            coefficients : 1d array
-                Array of BSpline coefficients, eg. as returned by the
-                fit method. No checking is performed on these.
-
-            data_t : 1d array
-                Array of timepoints at which to evaluate the spline curve.
-        """
-        return self.eval(data_t, coefficients)
-
-
 class PeriodicSpline:
     """
     OOP interface to periodic spline modelling.
+    TODO figure out how best to explain the periodicity stuff
     """
     def __init__(self, knots):
         """
@@ -179,39 +80,6 @@ class PeriodicSpline:
         return self.eval(data_t, coefficients, period)
 
 
-def _get_periodic_cubic_BSplines(interior_knots, a, b):
-    """
-    given a set of interior knots, compute the bspline basis functions
-    required to give a periodic spline model. Boundary points (ie. a,
-    b) must not be specified in the interior knots list, and instead
-    passed as separate arguments. Knots must be sorted into ascending
-    order. cubic spline knots are assumed, meaning at least three
-    interior knots must be provided.
-
-        interior_knots : 1d array
-            1d array of interior knots, sorted from smallest to
-            largest
-
-        a, b : float
-            Boundary points
-    """
-    # Check everything is okay
-    interior_knots = np.array(interior_knots)
-    if interior_knots.ndim != 1:
-        raise ValueError("Knot array must be one-dimensional")
-    if interior_knots.size < 3:
-        raise ValueError("Must have at least three interior knots for cubic splines")
-    # Construct knots
-    starter_knots = np.hstack((interior_knots[-3:], [b])) - (b - a)
-    end_knots = np.hstack(([a], interior_knots[:3])) + (b - a)
-    full_knots = np.hstack((starter_knots, interior_knots, end_knots))
-    # Produce list of spline elements
-    return [
-        BSpline.basis_element(full_knots[i: i + 5], extrapolate=False)
-        for i in range(full_knots.size - 4)
-    ]
-
-
 def _get_cubic_BSplines(interior_knots):
     """
     given a set of interior knots, compute the bspline basis functions
@@ -240,80 +108,6 @@ def _get_cubic_BSplines(interior_knots):
     full_knots = np.hstack((starter_knots, interior_knots, end_knots))
     # Produce list of spline elements
     return [BSpline.basis_element(full_knots[i:i+5], extrapolate=False) for i in range(full_knots.size - 4)]
-
-
-def _get_periodic_cubic_BSpline_derivatives(interior_knots, a, b):
-    """
-    given a set of interior knots, compute the bspline basis functions
-    required to give a periodic spline model. Boundary points (ie. a,
-    b) must not be specified in the interior knots list, and instead
-    passed as separate arguments. Knots must be sorted into ascending
-    order. cubic spline knots are assumed, meaning at least three
-    interior knots must be provided.
-
-        interior_knots : 1d array
-            1d array of interior knots, sorted from smallest to
-            largest
-
-        a, b : float
-            Boundary points
-    """
-    # Check everything is okay
-    interior_knots = np.array(interior_knots)
-    if interior_knots.ndim != 1:
-        raise ValueError("Knot array must be one-dimensional")
-    if interior_knots.size < 3:
-        raise ValueError("Must have at least three interior knots for cubic splines")
-    # Construct knots
-    starter_knots = np.hstack((interior_knots[-3:], [b])) - (b - a)
-    end_knots = np.hstack(([a], interior_knots[:3])) + (b - a)
-    full_knots = np.hstack((starter_knots, interior_knots, end_knots))
-    # Produce list of spline elements
-    return [
-        BSpline(full_knots[i: i + 5], [1], 3, extrapolate=False).derivative()
-        for i in range(full_knots.size - 4)
-    ]
-
-
-def _fit_periodic_bspline_coefficients(basis_splines, data_t, data_y, a, b):
-    """
-    Given a list of basis splines, as constructed from a set of
-    knots, and an array of data t and y coordinates, compute the
-    BSpline coefficients that specify a periodic BSpline curve.
-
-        basis_splines : list
-            List of basis spline functions. Assumed to have been
-            returned from _get_cubic_BSplines, so no further checking
-            is performed on this list.
-
-        data_t, data_y : 1d array
-            t data (independent variable), y data (dependent variable)
-            to fit a splines model to
-
-        a, b : float
-            Boundary points
-
-    Returns a list of the coefficients of the fitted spline model. The
-    last three coefficients are ommitted, as they are equal to the
-    first three coefficients.
-    """
-    # Check everything is okay
-    data_t = np.array(data_t)
-    if data_t.ndim != 1:
-        raise ValueError("data_t must be one-dimensional")
-    data_y = np.array(data_y)
-    if data_y.ndim != 1:
-        raise ValueError("data_y must be one-dimensional")
-    # Reduce time data down to within BSpline support
-    stacked_ts = np.mod(data_t - a, (b - a)) + a
-    # Construct the design matrix
-    design_mat = np.zeros((data_t.size, len(basis_splines) - 3))
-    for i, basis_func in enumerate(basis_splines[:-3]):
-        design_mat[:, i] = np.nan_to_num(basis_func(stacked_ts).T)
-    for i, basis_func in enumerate(basis_splines[-3:]):
-        design_mat[:, i] += np.nan_to_num(basis_func(stacked_ts).T)
-    # Return fitted coefficients
-    return np.linalg.lstsq(design_mat, data_y.reshape((-1, 1)), rcond=None)[0].squeeze()
 
 
 def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
@@ -357,43 +151,6 @@ def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
         design_mat[:, i] += np.nan_to_num(basis_func(stacked_ts).T)
     # Return fitted coefficients
     return np.linalg.lstsq(design_mat, data_y.reshape((-1, 1)), rcond=None)[0].squeeze()
-
-
-def _evaluate_periodic_spline_curve(basis_splines, data_t, coefficients, a, b):
-    """
-    Given a list of basis splines and a set of BSpline coefficients,
-    evaluate the spline curve at the specified time-data points.
-
-        basis_splines : list
-            List of basis spline functions. Assumed to have been
-            returned from _get_cubic_BSplines, so no further checking
-            is performed on this list.
-
-        coefficients : 1d array
-            Array of BSpline coefficients, as returned by
-            fit_bspline_coefficients. No further checking is
-            performed.
-
-        data_t : 1d array
-            Array of timepoints at which to evaluate the spline curve.
-
-        a, b : float
-            Boundary points
-    """
-    # Check everything is okay
-    data_t = np.array(data_t)
-    if data_t.ndim > 1:
-        raise ValueError("data_t must be one-dimensional")
-    # Reduce time data down to within BSpline support
-    stacked_ts = np.mod(data_t - a, (b - a)) + a
-    # Append the final BSpline coefficients
-    full_coeffs = np.hstack((coefficients, coefficients[:3]))
-    # Evaluate!
-    eval_mat = np.zeros((full_coeffs.size, stacked_ts.size))
-    for i, basis_func in enumerate(basis_splines):
-        eval_mat[i, :] = basis_func(stacked_ts)
-    eval_mat = np.nan_to_num(eval_mat)
-    return np.inner(eval_mat.T, full_coeffs).squeeze()
 
 
 def _evaluate_spline_curve(basis_splines, data_t, coefficients, period):
