@@ -212,6 +212,36 @@ def _get_periodic_cubic_BSplines(interior_knots, a, b):
     ]
 
 
+def _get_cubic_BSplines(interior_knots):
+    """
+    given a set of interior knots, compute the bspline basis functions
+    required to give a periodic spline model. data are assumed to be
+    distributed across the unit period, and therefore the interior
+    knots must be within the unit interval. boundary knots (ie. 0, 1)
+    must not be provided. knots must be sorted into ascending order.
+    cubic spline knots are assumed, meaning at least three interior
+    knots must be provided.
+
+        interior_knots : 1d array
+            1d array of interior knots, sorted from smallest to
+            largest
+    """
+    # Check everything is okay
+    interior_knots = np.array(interior_knots)
+    if not np.all(np.logical_and(interior_knots>=0, interior_knots<=1)):
+        raise ValueError("Interior knots must be distributed across the unit period")
+    if interior_knots.ndim != 1:
+        raise ValueError("Knot array must be one-dimensional")
+    if interior_knots.size < 3:
+        raise ValueError("Must have at least three interior knots for cubic splines")
+    # Construct knots
+    starter_knots = np.hstack((interior_knots[-3:], [1])) - 1
+    end_knots = np.hstack(([0], interior_knots[:3])) + 1
+    full_knots = np.hstack((starter_knots, interior_knots, end_knots))
+    # Produce list of spline elements
+    return [BSpline.basis_element(full_knots[i:i+5], extrapolate=False) for i in range(full_knots.size - 4)]
+
+
 def _get_periodic_cubic_BSpline_derivatives(interior_knots, a, b):
     """
     given a set of interior knots, compute the bspline basis functions
@@ -286,73 +316,6 @@ def _fit_periodic_bspline_coefficients(basis_splines, data_t, data_y, a, b):
     return np.linalg.lstsq(design_mat, data_y.reshape((-1, 1)), rcond=None)[0].squeeze()
 
 
-def _evaluate_periodic_spline_curve(basis_splines, data_t, coefficients, a, b):
-    """
-    Given a list of basis splines and a set of BSpline coefficients,
-    evaluate the spline curve at the specified time-data points.
-
-        basis_splines : list
-            List of basis spline functions. Assumed to have been
-            returned from _get_cubic_BSplines, so no further checking
-            is performed on this list.
-
-        coefficients : 1d array
-            Array of BSpline coefficients, as returned by
-            fit_bspline_coefficients. No further checking is
-            performed.
-
-        data_t : 1d array
-            Array of timepoints at which to evaluate the spline curve.
-
-        a, b : float
-            Boundary points
-    """
-    # Check everything is okay
-    data_t = np.array(data_t)
-    if data_t.ndim > 1:
-        raise ValueError("data_t must be one-dimensional")
-    # Reduce time data down to within BSpline support
-    stacked_ts = np.mod(data_t - a, (b - a)) + a
-    # Append the final BSpline coefficients
-    full_coeffs = np.hstack((coefficients, coefficients[:3]))
-    # Evaluate!
-    eval_mat = np.zeros((full_coeffs.size, stacked_ts.size))
-    for i, basis_func in enumerate(basis_splines):
-        eval_mat[i, :] = basis_func(stacked_ts)
-    eval_mat = np.nan_to_num(eval_mat)
-    return np.inner(eval_mat.T, full_coeffs).squeeze()
-
-
-def _get_cubic_BSplines(interior_knots):
-    """
-    given a set of interior knots, compute the bspline basis functions
-    required to give a periodic spline model. data are assumed to be
-    distributed across the unit period, and therefore the interior
-    knots must be within the unit interval. boundary knots (ie. 0, 1)
-    must not be provided. knots must be sorted into ascending order.
-    cubic spline knots are assumed, meaning at least three interior
-    knots must be provided.
-
-        interior_knots : 1d array
-            1d array of interior knots, sorted from smallest to
-            largest
-    """
-    # Check everything is okay
-    interior_knots = np.array(interior_knots)
-    if not np.all(np.logical_and(interior_knots>=0, interior_knots<=1)):
-        raise ValueError("Interior knots must be distributed across the unit period")
-    if interior_knots.ndim != 1:
-        raise ValueError("Knot array must be one-dimensional")
-    if interior_knots.size < 3:
-        raise ValueError("Must have at least three interior knots for cubic splines")
-    # Construct knots
-    starter_knots = np.hstack((interior_knots[-3:], [1])) - 1
-    end_knots = np.hstack(([0], interior_knots[:3])) + 1
-    full_knots = np.hstack((starter_knots, interior_knots, end_knots))
-    # Produce list of spline elements
-    return [BSpline.basis_element(full_knots[i:i+5], extrapolate=False) for i in range(full_knots.size - 4)]
-
-
 def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
     """
     Given a list of basis splines, as constructed from the specified
@@ -394,6 +357,43 @@ def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
         design_mat[:, i] += np.nan_to_num(basis_func(stacked_ts).T)
     # Return fitted coefficients
     return np.linalg.lstsq(design_mat, data_y.reshape((-1, 1)), rcond=None)[0].squeeze()
+
+
+def _evaluate_periodic_spline_curve(basis_splines, data_t, coefficients, a, b):
+    """
+    Given a list of basis splines and a set of BSpline coefficients,
+    evaluate the spline curve at the specified time-data points.
+
+        basis_splines : list
+            List of basis spline functions. Assumed to have been
+            returned from _get_cubic_BSplines, so no further checking
+            is performed on this list.
+
+        coefficients : 1d array
+            Array of BSpline coefficients, as returned by
+            fit_bspline_coefficients. No further checking is
+            performed.
+
+        data_t : 1d array
+            Array of timepoints at which to evaluate the spline curve.
+
+        a, b : float
+            Boundary points
+    """
+    # Check everything is okay
+    data_t = np.array(data_t)
+    if data_t.ndim > 1:
+        raise ValueError("data_t must be one-dimensional")
+    # Reduce time data down to within BSpline support
+    stacked_ts = np.mod(data_t - a, (b - a)) + a
+    # Append the final BSpline coefficients
+    full_coeffs = np.hstack((coefficients, coefficients[:3]))
+    # Evaluate!
+    eval_mat = np.zeros((full_coeffs.size, stacked_ts.size))
+    for i, basis_func in enumerate(basis_splines):
+        eval_mat[i, :] = basis_func(stacked_ts)
+    eval_mat = np.nan_to_num(eval_mat)
+    return np.inner(eval_mat.T, full_coeffs).squeeze()
 
 
 def _evaluate_spline_curve(basis_splines, data_t, coefficients, period):
