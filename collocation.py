@@ -2,6 +2,7 @@ import numpy as np
 import abc
 import scipy.integrate
 import continuation
+import splines
 
 # Error tolerance for floating-point equality
 FTOL = 1e-6
@@ -239,6 +240,42 @@ class KroghMesh(CollocationMesh):
         raise NotImplementedError
 
 
+class BSplineMesh(CollocationMesh):
+    def __init__(self, mesh_size, order=3):
+        """
+        BSpline collocation doesn't divide the data into subintervals.
+        Instead, it maintains a single subinterval over the entire BVP
+        domain [0,1]. The subinterval mesh is taken as a knot list for
+        the spline functions. mesh_size therefore specifies the number
+        of BSpline basis functions, and order specifies the order of
+        the splines, similarly to with polynomial collocation. Note
+        that BSpline collocation is only implemented for third-order
+        (cubic) BSplines, so choosing an order!=3 will raise a
+        NotImplementedError. Also, for third-order periodic splines,
+        we require at least 4 BSpline functions, so choosing
+        mesh_size<4 will raise a ValueError.
+        """
+        if mesh_size < 4:
+            raise ValueError("Must have at least 4 cubic BSpline functions")
+        if order != 3:
+            raise NotImplementedError("BSpline collocation is only implemented for third-order BSplines")
+        super().__init__(1, mesh_size)
+        self.splines = splines.PeriodicSpline(self.full_mesh[1:-1])
+
+    def _eval(self, submesh, coefficients, ts):
+        # TODO make sure this works for multidimensional coefficients
+        # TODO make sure we get passed only a 2d coefficient matrix
+        return self.splines.eval(ts, coefficients, 1)
+
+    def _derivative(self, submesh, coefficients, ts):
+        # TODO make sure this works for multidimensional coefficients
+        # TODO make sure we get passed only a 2d coefficient matrix
+        return self.splines.derivative(ts, coefficients, 1)
+
+    def remesh(self, mesh_size, order, coefficients):
+        raise NotImplementedError
+
+
 class NumericalContinuation(continuation.Continuation):
     """
     Implements a Continuation class using orthogonal collocation for
@@ -246,10 +283,10 @@ class NumericalContinuation(continuation.Continuation):
     systems.
     """
 
-    def __init__(self, ode_RHS, collocation_function_obj):
+    def __init__(self, ode_RHS, collocation_mesh):
         # TODO modify this for consistency with the Continuation superclass
         self.ode_RHS = ode_RHS
-        self.col_func = collocation_function_obj
+        self.col_func = collocation_mesh
 
     def get_parameter(self, continuation_vec):
         return continuation_vec[0]
@@ -384,3 +421,43 @@ class NumericalContinuation(continuation.Continuation):
             ode, [0, period], initial_cond, atol=1e-9, rtol=1e-9
         )
         return [soln.t, soln.y]
+
+
+class BSplineContinuation(NumericalContinuation):
+    """
+    The same as NumericalContinuation, only we've dropped the
+    continuity / periodicity requirement, since it's automatically
+    satisfied by our periodic BSplines.
+    """
+
+    def get_discretisation(self, continuation_vec):
+        return np.array(continuation_vec[2:]).reshape(
+            (self.col_func.n_subintervals, self.col_func.order, -1)
+        )
+
+    def collocation_system(self, continuation_vector, v_dot):
+        """
+        Set up a collocation system, without the pseudo-arclength
+        constraint. Given a phase reference solution and some initial
+        estimate of the current continuation vector, this system can
+        be solved to locate a limit cycle. Returns an array of zeros
+        when the collocation and phase equations are satisfied,
+        indicating that a LC has been found.
+
+            continuation_vector : 1d array
+                Vector encoding the current limit cycle solution, or
+                estimate thereof.
+
+            v_dot : func
+                Time-derivative of the reference signal used by the
+                phase condition.
+        """
+        period = self.get_period(continuation_vector)
+        parameter = self.get_parameter(continuation_vector)
+        coefficients = self.get_discretisation(continuation_vector)
+
+        target_LHS = self.col_func.derivative(coefficients)
+        target_RHS = period * self.ode_RHS(self.col_func.eval(coefficients), parameter,)
+        collocations = (target_LHS - target_RHS).reshape(-1)
+        phase_condition = self._phase_condition(coefficients, v_dot)
+        return np.hstack((collocations, phase_condition))

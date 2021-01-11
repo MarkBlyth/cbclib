@@ -5,13 +5,13 @@ import scipy.integrate
 import numpy as np
 import collocation
 
-MESH_SIZE = 3
+MESH_SIZE = 6
 POLYNOMIAL_ORDER = 3
 INITIAL_PARS = (1, 2)
 PAR_RANGE = [1, 10]
 
 
-def estimate_initial_continuation_vector(
+def estimate_initial_krogh_continuation_vector(
     continuation_obj, parameter, period, initial_cond
 ):
     """
@@ -37,6 +37,30 @@ def estimate_initial_continuation_vector(
     target_shape = (continuation_obj.col_func.n_subintervals, -1, coeffs_list.shape[1])
     coeffs_list.reshape(target_shape)
     return np.hstack((parameter, period, coeffs_list.reshape(-1)))
+
+
+def estimate_initial_BSpline_continuation_vector(
+    continuation_obj, parameter, period, initial_cond
+):
+    """
+    Similar to before, but using BSplines, so the coefficients need to
+    be found slightly differently, as they are no longer points on the
+    orbit.
+    """
+
+    def ode(t, y):
+        return continuation_obj.ode_RHS(y, parameter)
+
+    soln = scipy.integrate.solve_ivp(
+        ode, [0, period], initial_cond, dense_output=True
+    )
+    coeffs = None
+    for y_dim in soln.y:
+        if coeffs is None:
+            coeffs = continuation_obj.col_func.splines.fit(soln.t, y_dim, period)
+        else:
+            coeffs = np.c_[coeffs, continuation_obj.col_func.splines.fit(soln.t, y_dim, period)]
+    return np.hstack((parameter, period, coeffs.reshape(-1)))
 
 
 def get_starters(guess_vec_1, guess_vec_2, continuer):
@@ -81,13 +105,22 @@ def solver(sys, x0):
 
 
 def main():
-    krogh = collocation.KroghMesh(MESH_SIZE, POLYNOMIAL_ORDER)
-    continuer = collocation.NumericalContinuation(hopf, krogh)
+    # krogh = collocation.KroghMesh(MESH_SIZE, POLYNOMIAL_ORDER)
+    # continuer = collocation.NumericalContinuation(hopf, krogh)
+    # initial_vec_1 = estimate_initial_krogh_continuation_vector(
+    #     continuer, INITIAL_PARS[0], 6.2, [0, np.sqrt(INITIAL_PARS[0])]
+    # )
+    # initial_vec_2 = estimate_initial_krogh_continuation_vector(
+    #     continuer, INITIAL_PARS[1], 6.2, [0, np.sqrt(INITIAL_PARS[1])]
+    # )
 
-    initial_vec_1 = estimate_initial_continuation_vector(
+    spline = collocation.BSplineMesh(MESH_SIZE, POLYNOMIAL_ORDER)
+    continuer = collocation.BSplineContinuation(hopf, spline)
+
+    initial_vec_1 = estimate_initial_BSpline_continuation_vector(
         continuer, INITIAL_PARS[0], 6.2, [0, np.sqrt(INITIAL_PARS[0])]
     )
-    initial_vec_2 = estimate_initial_continuation_vector(
+    initial_vec_2 = estimate_initial_BSpline_continuation_vector(
         continuer, INITIAL_PARS[1], 6.2, [0, np.sqrt(INITIAL_PARS[1])]
     )
     starters = get_starters(initial_vec_1, initial_vec_2, continuer)
