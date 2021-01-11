@@ -203,9 +203,9 @@ class Continuation(abc.ABC):
                 2].
 
             solver : func
-                Function of signature solver(system, initial_guess,
-                max_iter). Returns the solution to the system,
-                starting from initial point initial_guess.
+                Function of signature solver(system, initial_guess).
+                Returns the solution to the system, starting from
+                initial point initial_guess.
 
             stepsize : float > 0
                 Size of the secant vector used when making a prediction of
