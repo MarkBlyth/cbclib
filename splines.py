@@ -1,4 +1,5 @@
 from scipy.interpolate import BSpline
+import scipy.interpolate
 import warnings
 import numpy as np
 
@@ -8,6 +9,7 @@ class PeriodicSpline:
     OOP interface to periodic spline modelling.
     TODO figure out how best to explain the periodicity stuff
     """
+
     def __init__(self, knots):
         """
         given a set of interior knots, initialise an appropriate set
@@ -24,6 +26,7 @@ class PeriodicSpline:
                 largest
         """
         self._BSplines = _get_cubic_BSplines(knots)
+        self._knots = knots
 
     def fit(self, data_t, data_y, period):
         """
@@ -59,7 +62,26 @@ class PeriodicSpline:
             period : float > 0
                 Period of the spline curve to be evaluated.
         """
+        if np.array(coefficients).ndim == 2:
+            return _evaluate_multispline_curve(
+                self._BSplines, data_t, coefficients, period
+            )
         return _evaluate_spline_curve(self._BSplines, data_t, coefficients, period)
+
+    def derivative(self, data_t, coefficients, period):
+        data_t = np.array(data_t)
+        if data_t.ndim > 1:
+            raise ValueError("data_t must be one-dimensional")
+        if not float(period) > 0:
+            warnings.warn("Negative period encountered")
+        # Reduce time data down to within BSpline support
+        stacked_ts = np.mod(data_t / period, 1)
+
+        full_coeffs = np.r_[coefficients, coefficients[:3]].T
+        full_knots = _get_full_knots(self._knots)
+        splrep = (full_knots, full_coeffs, 3)
+        ret = np.array(scipy.interpolate.splev(stacked_ts, splrep, der=1))
+        return ret.T.squeeze()
 
     def __call__(self, data_t, coefficients, period):
         """
@@ -80,6 +102,12 @@ class PeriodicSpline:
         return self.eval(data_t, coefficients, period)
 
 
+def _get_full_knots(interior_knots):
+    starter_knots = np.hstack((interior_knots[-3:], [1])) - 1
+    end_knots = np.hstack(([0], interior_knots[:3])) + 1
+    return np.r_[starter_knots, interior_knots, end_knots]
+
+
 def _get_cubic_BSplines(interior_knots):
     """
     given a set of interior knots, compute the bspline basis functions
@@ -96,18 +124,18 @@ def _get_cubic_BSplines(interior_knots):
     """
     # Check everything is okay
     interior_knots = np.array(interior_knots)
-    if not np.all(np.logical_and(interior_knots>=0, interior_knots<=1)):
+    if not np.all(np.logical_and(interior_knots >= 0, interior_knots <= 1)):
         raise ValueError("Interior knots must be distributed across the unit period")
     if interior_knots.ndim != 1:
         raise ValueError("Knot array must be one-dimensional")
     if interior_knots.size < 3:
         raise ValueError("Must have at least three interior knots for cubic splines")
-    # Construct knots
-    starter_knots = np.hstack((interior_knots[-3:], [1])) - 1
-    end_knots = np.hstack(([0], interior_knots[:3])) + 1
-    full_knots = np.hstack((starter_knots, interior_knots, end_knots))
+    full_knots = _get_full_knots(interior_knots)
     # Produce list of spline elements
-    return [BSpline.basis_element(full_knots[i:i+5], extrapolate=False) for i in range(full_knots.size - 4)]
+    return [
+        BSpline.basis_element(full_knots[i : i + 5], extrapolate=False)
+        for i in range(full_knots.size - 4)
+    ]
 
 
 def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
@@ -142,7 +170,7 @@ def _fit_bspline_coefficients(basis_splines, data_t, data_y, period):
     if not float(period) > 0:
         warnings.warn("Negative period encountered")
     # Reduce time data down to within BSpline support
-    stacked_ts = np.mod(data_t/period, 1)
+    stacked_ts = np.mod(data_t / period, 1)
     # Construct the design matrix
     design_mat = np.zeros((data_t.size, len(basis_splines) - 3))
     for i, basis_func in enumerate(basis_splines[:-3]):
@@ -182,7 +210,7 @@ def _evaluate_spline_curve(basis_splines, data_t, coefficients, period):
     if not float(period) > 0:
         warnings.warn("Negative period encountered")
     # Reduce time data down to within BSpline support
-    stacked_ts = np.mod(data_t/period, 1)
+    stacked_ts = np.mod(data_t / period, 1)
     # Append the final BSpline coefficients
     full_coeffs = np.hstack((coefficients, coefficients[:3]))
     # Evaluate!
@@ -191,3 +219,52 @@ def _evaluate_spline_curve(basis_splines, data_t, coefficients, period):
         eval_mat[i, :] = basis_func(stacked_ts)
     eval_mat = np.nan_to_num(eval_mat)
     return np.inner(eval_mat.T, full_coeffs).squeeze()
+
+
+def _evaluate_multispline_curve(basis_splines, data_t, coefficients, period):
+    """
+    Given a list of basis splines, a set of BSpline coefficients, and
+    a period, evaluate the spline curve at the specified time-data
+    points.
+
+        basis_splines : list
+            List of basis spline functions. Assumed to have been
+            returned from _get_cubic_BSplines, so no further checking
+            is performed on this list.
+
+        coefficients : 2d array
+            Array of BSpline coefficients, as returned by
+            fit_bspline_coefficients. No further checking is
+            performed.
+
+        data_t : 1d array
+            Array of timepoints at which to evaluate the spline curve.
+
+        period : float > 0
+            Period of the spline curve to be evaluated.
+    """
+    # Check everything is okay
+    data_t = np.array(data_t)
+    if data_t.ndim > 1:
+        raise ValueError("data_t must be one-dimensional")
+    if not float(period) > 0:
+        warnings.warn("Negative period encountered")
+    # Reduce time data down to within BSpline support
+    stacked_ts = np.mod(data_t / period, 1)
+    full_coeffs = np.vstack((coefficients, coefficients[:3]))
+    # Append the final BSpline coefficients
+    if len(basis_splines) != len(full_coeffs[:, 0]):
+        raise ValueError(
+            "Must have same number of coefficient vectors ({0}) as basis splines ({1})".format(
+                len(full_coeffs[:, 0]), len(basis_splines)
+            )
+        )
+    results = np.zeros((stacked_ts.size, len(coefficients[0])))
+    for i, dim in enumerate(full_coeffs.T):
+        eval_mat = np.zeros((dim.size, stacked_ts.size))
+        for j, basis_func in enumerate(basis_splines):
+            eval_mat[j, :] = basis_func(stacked_ts)
+        eval_mat = np.nan_to_num(eval_mat)
+        dim_vals = np.inner(eval_mat.T, dim).squeeze()
+        results[:, i] = dim_vals
+    return results
