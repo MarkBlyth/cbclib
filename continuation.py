@@ -1,9 +1,16 @@
+# TODO        Move adaptive-stepsize Jacobian finder, stepsize to changeable parameters
+# TODO        Integrate finite-differences jacobian into Broyden method, so we can reuse the initial f(x0) and save a computation
+# TODO        Rewrite Newton solver as something more tidy
+
 import abc
 import numpy as np
 import discretise
 import copy
 import numdifftools as ndt
 import scipy.integrate
+import warnings
+
+DEFAULT_CONVERGENCE_TOL = 5e-4
 
 """
 GOAL: scripts for continuing periodic orbits in a controlled system.
@@ -21,27 +28,96 @@ TODOs
 """
 
 
+class StepsizeError(Exception):
+    pass
+
+
+def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
+    if np.isscalar(stepsize):
+        stepsize = stepsize * np.ones(x.shape)
+    perturbations = np.diag(stepsize)
+    if central:
+        jac_transpose = [(f(x + h) - f(x - h)) / (2 * np.max(h)) for h in perturbations]
+    else:
+        f_x = f(x)
+        jac_transpose = [(f(x + h) - f_x) / np.max(h) for h in perturbations]
+    return np.array(jac_transpose).T
+
+
+def scipy_broyden_solver(sys, x0):
+    solution = scipy.optimize.root(
+        sys, x0, tol=DEFAULT_CONVERGENCE_TOL, method="broyden1"
+    )
+    print("Solution vector: ", solution.x)
+    print("Solution value: ", solution.fun)
+    print("Parameter: ", solution.x[0])
+    if solution.success:
+        return solution.x
+    return None
+
+
+def broyden_solver(
+    system,
+    starter,
+    max_iter=25,
+    finite_differences_stepsize=None,
+    convergence_tol=DEFAULT_CONVERGENCE_TOL,
+    silent=False,
+    callback=None,
+):
+    def new_print(*args):
+        if not silent:
+            print(*args)
+
+    jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        jacobian = jacobian_func(starter)
+    #  jacobian = finite_differences_jacobian(system, starter)
+    min_iters = 1 if callback is None else 2
+    i, soln, func_evaluation = 0, starter, system(starter)
+    results = [(starter, np.linalg.norm(func_evaluation))]
+
+    while (
+        i < min_iters
+        or (
+            np.linalg.norm(step) > convergence_tol
+            and np.linalg.norm(func_evaluation) > convergence_tol
+        )
+    ) and i < max_iter:
+        step = np.linalg.solve(jacobian, func_evaluation)
+        soln -= step
+        last_func_evaluation = func_evaluation
+        func_evaluation = system(soln)
+        jacobian_step = (
+            (func_evaluation - last_func_evaluation) - jacobian.dot(step)
+        ).dot(step.T) / np.linalg.norm(step) ** 2
+        jacobian += jacobian_step
+        results.append((soln, np.linalg.norm(func_evaluation)))
+
+        new_print("Solver iteration ", i)
+        new_print("Jacobian condition number: ", np.linalg.cond(jacobian))
+        new_print("New continuation vector:\n", soln)
+        new_print("System evaluation:\n", func_evaluation, "\n")
+        i += 1
+        if callback is not None:
+            callback(step)
+
+    if i != max_iter:
+        new_print("Converged in {0} step(s)".format(i), "\n")
+    return min(results, key=lambda x: x[1])[0]
+
+
 def newton_solver(
     system,
     starter,
-    max_iter=100,
+    max_iter=5,
     finite_differences_stepsize=None,
-    convergence_criteria=None,
+    convergence_tol=DEFAULT_CONVERGENCE_TOL,
     silent=False,
+    callback=None,
 ):
-    jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
-
-    if convergence_criteria is None:
-
-        def convergence_criteria(vec0, vec1, system_evaluation):
-            return np.linalg.norm(vec1 - vec0) < 1e-6
-
-    def modified_convergence_criteria(
-        vec0, vec1, system_evaluation, convergence_criteria
-    ):
-        if vec0 is None:
-            return False
-        return convergence_criteria(vec0, vec1, system_evaluation)
+    # jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
 
     def new_print(*args):
         if not silent:
@@ -49,24 +125,41 @@ def newton_solver(
 
     # Solve
     i, last_step, this_step = 0, None, starter
-    while not modified_convergence_criteria(
-        last_step, this_step, system(this_step), convergence_criteria
-    ):
+    f_eval = system(starter)
+    results = [(starter, np.linalg.norm(f_eval))]
+    min_iters = 1 if callback is None else 2
+    while (
+        i < min_iters
+        or (
+            np.linalg.norm(system(this_step)) > convergence_tol
+            and np.linalg.norm(step) > convergence_tol
+        )
+    ) and i < max_iter:
         if i > max_iter:
             return None
         last_step = this_step
-        jacobian = jacobian_func(this_step)
-        step = np.linalg.solve(jacobian, -system(this_step))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            jacobian = jacobian_func(this_step)
+        #  jacobian = finite_differences_jacobian(
+        #     system, starter
+        # )  
+        f_eval = system(this_step)
+        step = np.linalg.solve(jacobian, -f_eval)
         this_step += step
         i += 1
+        results.append((this_step, np.linalg.norm(f_eval)))
+
         new_print("Solver iteration ", i)
-        new_print("Jacobian:\n", jacobian)
-        new_print("\nJacobian condition number: ", np.linalg.cond(jacobian), "\n")
-        new_print("\nNew continuation vector:\n", this_step)
-        new_print("\nSystem evaluation:\n", system(this_step), "\n")
-    new_print("Converged in {0} step(s)".format(i))
-    new_print("\n\n")
-    return this_step
+        new_print("Jacobian condition number: ", np.linalg.cond(jacobian))
+        new_print("New continuation vector:\n", this_step)
+        new_print("System evaluation:\n", system(this_step), "\n")
+        if callback is not None:
+            callback(step)
+
+    if i != max_iter:
+        new_print("Converged in {0} step(s)".format(i), "\n")
+    return min(results, key=lambda x: x[1])[0]
 
 
 class Continuation(abc.ABC):
@@ -120,32 +213,12 @@ class Continuation(abc.ABC):
     METHODS, HELPERS USED TO RUN A CONTINUATION PROBLEM.
     """
 
-    def _modified_convergence_criteria(
-        self, vec0, vec1, system_evaluation, convergence_criteria
-    ):
-        """
-        Override the provided convergence_criteria function so that it
-        returns False on the first step. This allows the solver to
-        avoid converging on the very first iteration.
-
-            vec0 : continuation vector
-                Previous iteration vector.
-
-            vec1 : continuation vector
-                Current iteration vector.
-
-            convergence_criteria : function
-                Function of signature func(v0, v1). Returns True if
-                the solver iteration scheme has converged, based on
-                the current and previous solution estimates. False
-                otherwise.
-        """
-        if vec0 is None:
-            return False
-        return convergence_criteria(vec0, vec1, system_evaluation)
-
-    def _prediction_correction_step(
-        self, y0, y1, stepsize, solver=newton_solver,
+    def _nonadaptive_prediction_correction_step(
+        self,
+        y0,
+        y1,
+        stepsize,
+        solver=newton_solver,
     ):
         """
         Perform a predictor-corrector step using the psuedo-arclength
@@ -174,16 +247,100 @@ class Continuation(abc.ABC):
         # Predict
         secant = (y1 - y0) / np.linalg.norm(y1 - y0)
         prediction = y1 + stepsize * secant
-        bound_continuation_system = lambda y_in: self._continuation_system(
-            y_in, y1, prediction, secant
-        )
+
+        def bound_continuation_system(y_in):
+            return self._continuation_system(y_in, y1, prediction, secant)
+
         return solver(bound_continuation_system, prediction)
+
+    def _adaptive_stepsize_prediction_correction_step(
+        self,
+        y0,
+        y1,
+        stepsize,
+        nominal_steplength,
+        nominal_contraction,
+        min_stepsize,
+        max_stepsize,
+    ):
+
+        secant = (y1 - y0) / np.linalg.norm(y1 - y0)
+        prediction = y1 + stepsize * secant
+        newton_steps = []
+
+        print("Starting solver with a stepsize of ", stepsize)
+        print("Prediction: ", prediction)
+
+        def bound_continuation_system(y_in):
+            return self._continuation_system(y_in, y1, prediction, secant)
+
+        def callback(step):
+            """Store solutions as they become available. If we need to
+            retry with a smaller stepsize, raise a StepsizeError.
+            Otherwise use the first two steps to update the
+            stepsize."""
+            nonlocal stepsize
+            if len(newton_steps) > 1:
+                return
+            newton_steps.append(step)
+            if len(newton_steps) == 2:
+                delta = np.linalg.norm(newton_steps[0])
+                kappa = np.linalg.norm(newton_steps[1]) / delta
+                print(
+                    "Steplength: nominal, actual, multiplier: {0}, {1}, {2}".format(
+                        nominal_steplength, delta, np.sqrt(nominal_steplength / delta)
+                    )
+                )
+                print(
+                    "Contraction: nominal, actual, multiplier: {0}, {1}, {2}".format(
+                        nominal_contraction, kappa, np.sqrt(nominal_contraction / kappa)
+                    )
+                )
+                f = max(delta / nominal_steplength, kappa / nominal_contraction)
+                if (f > 4) and (stepsize / 2 > min_stepsize):
+                    print("Retrying with a smaller stepsize")
+                    stepsize /= 2
+                    print("New stepsize: ", stepsize, "\n")
+                    raise StepsizeError
+                f_floor_ceil = max(0.25, min(f, 4))
+                stepsize /= np.sqrt(f_floor_ceil)
+                stepsize = min(max(stepsize, min_stepsize), max_stepsize)
+                print("New stepsize: ", stepsize, "\n")
+
+        try:
+            # Attempt to solve with the current stepsize
+            solution = newton_solver(
+                bound_continuation_system,
+                prediction,
+                callback=callback,
+            )
+            # BROYDEN SOLVER ALWAYS RETURNS A SOLUTION GUESS SO THIS ISN'T ACTUALLY DOING ANYTHING THERE
+            if solution is None:
+                # Solver returns None on failure to converge
+                print("Convergence was not reached within the iteration limit")
+                return -1, None
+            print("New stepsize: ", stepsize)
+            print("Solution vector: ", solution)
+            print("Parameter: ", solution[0], "\n\n")
+            return stepsize, solution
+        except StepsizeError:
+            # Raised if we need to try again with a smaller step
+            # Compute a new prediction using the updated stepsize, and solve
+            return self._adaptive_stepsize_prediction_correction_step(
+                y0,
+                y1,
+                stepsize,
+                nominal_steplength,
+                nominal_contraction,
+                min_stepsize,
+                max_stepsize,
+            )
 
     def run_continuation(
         self,
         starters,
-        solver=newton_solver,
-        stepsize=1,
+        solver=scipy_broyden_solver,
+        step_control=1,
         par_range=[-np.inf, np.inf],
         n_steps=1000,
         max_period=np.inf,
@@ -207,7 +364,7 @@ class Continuation(abc.ABC):
                 Returns the solution to the system, starting from
                 initial point initial_guess.
 
-            stepsize : float > 0
+            step_control : float > 0
                 Size of the secant vector used when making a prediction of
                 the next periodic orbit. Needs to be sufficiently small to
                 be able to accurately represent the continuation curve.
@@ -227,11 +384,39 @@ class Continuation(abc.ABC):
         solution_vecs = [copy.deepcopy(s) for s in starters]
         # Can exit the continuation steps with CTRL-C
         try:
+            (
+                stepsize,
+                min_stepsize,
+                max_stepsize,
+                nominal_steplength,
+                nominal_contraction,
+            ) = step_control
+
+            def take_step(self, y0, y1, stepsize):
+                return self._adaptive_stepsize_prediction_correction_step(
+                    y0,
+                    y1,
+                    stepsize,
+                    nominal_steplength,
+                    nominal_contraction,
+                    min_stepsize,
+                    max_stepsize,
+                )
+
+        except TypeError:
+
+            def take_step(self, y0, y1, stepsize):
+                return stepsize, self._nonadaptive_prediction_correction_step(
+                    y0, y1, stepsize, solver
+                )
+
+            stepsize = step_control
+        try:
             for i in range(n_steps):
                 # Keep stepping until an exit criterion is met
                 print("Step {0}".format(i + 1))
-                new_vec = self._prediction_correction_step(
-                    solution_vecs[-2], solution_vecs[-1], stepsize, solver,
+                stepsize, new_vec = take_step(
+                    self, solution_vecs[-2], solution_vecs[-1], stepsize
                 )
                 if new_vec is None:
                     message = "Continuation terminated as last correction step did not converge"
@@ -409,7 +594,7 @@ class Continuation(abc.ABC):
 class ControlBasedContinuation(Continuation):
     """
     TODO how does the user do something with this? What does the constructor look like? How do they initialise? Which abstract methods need implementing?
-    
+
 
             continuation_target : function(control target, system parameter)
                 Something resembling a physical system. Given only a

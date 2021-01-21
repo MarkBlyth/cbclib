@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import continuation
 import discretise
 
-STARTER_PARAMS = [(0.5, 0.51)]
+STARTER_PARAMS = [(0.5, 0.65)]
 KP = 1
 INTEGRATION_TIME = 30
 TRANSIENT_TIME = 100
@@ -18,6 +18,7 @@ N_SAMPLES = INTEGRATION_TIME * 10
 ###
 DSIZE = 5
 STEPSIZE = 1
+STEP_CONTROL = [1, 1, 1, 0.15, np.inf] ## Initial step; min., max. step; nominal step=0.15, contraction
 FINITE_DIFFERENCES_STEPSIZE = 0.2
 
 
@@ -117,19 +118,12 @@ class DuffingContinuation(continuation.ControlBasedContinuation):
 
 def main():
     results = []
-    solver = lambda sys, x0: continuation.newton_solver(
-        sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
-    )
+    # solver = lambda sys, x0: continuation.newton_solver(
+    #     sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
+    # )
 
     """ SCIPY SOLVER """
-    # def solver(sys, x0):
-    #     solution = scipy.optimize.root(sys, x0, tol=1e-6)
-    #     print("Solution vector: ", solution.x)
-    #     print("Solution value: ", solution.fun)
-    #     print("Parameter: ", solution.x[0])
-    #     if solution.success:
-    #         return solution.x
-    #     return None
+    solver = continuation.scipy_broyden_solver
 
     for par_0, par_1 in STARTER_PARAMS:
         signal_0 = blackbox_system(None, par_0)
@@ -143,7 +137,7 @@ def main():
         continuer = DuffingContinuation(blackbox_system, discretisor)
 
         continuation_vectors, message = continuer.run_continuation(
-            starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
+            starters, solver=solver, step_control=STEPSIZE, par_range=[0.5, 2]
         )
         print(message)
         results.append(continuation_vectors)

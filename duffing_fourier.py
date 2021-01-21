@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import continuation
 import discretise
 
-STARTER_PARAMS = [(0.5, 0.51)]  # [(2.0, 1.99)]  # [(0.5, 0.51), (2.0, 1.99)]
+STARTER_PARAMS = [(0.5, 0.51)]
 N_HARMONICS = 3
 KP = 1
 INTEGRATION_TIME = 30
@@ -17,6 +17,7 @@ TRANSIENT_TIME = 100
 ###
 N_SAMPLES = INTEGRATION_TIME * 10
 STEPSIZE = 0.2
+STEP_CONTROL = [0.2, 0.2, 0.2, 0.05, np.inf] ## Initial step; min., max. step; nominal step, contraction
 FINITE_DIFFERENCES_STEPSIZE = 0.1
 
 
@@ -102,11 +103,15 @@ def main():
             build_continuation_vector(signal_1, discretisor, par_1),
         ]
 
-        solver = lambda sys, x0: continuation.newton_solver(
-            sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
-        )
+        # solver = lambda sys, x0: continuation.newton_solver(
+        #     sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
+        # )
+
+        """ SCIPY SOLVER """
+        solver = continuation.scipy_broyden_solver
+
         continuation_vectors, message = continuer.run_continuation(
-            starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
+            starters, solver=solver, step_control=STEPSIZE, par_range=[0.5, 2]
         )
         print(message)
         results.append(continuation_vectors)
