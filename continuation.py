@@ -24,49 +24,46 @@ TODOs
 def newton_solver(
     system,
     starter,
-    max_iter=100,
+    max_iter=1,
     finite_differences_stepsize=None,
     convergence_criteria=None,
     silent=False,
+    hardstop=False,  ### If true, return None to indicate convergence failure when max_iter is exceeded; if false, return whatever solution we have after max_iter
 ):
     jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
 
     if convergence_criteria is None:
 
-        def convergence_criteria(vec0, vec1, system_evaluation):
-            return np.linalg.norm(vec1 - vec0) < 1e-6
+        def convergence_criteria(step, system_evaluation):
+            return np.linalg.norm(step) < 1e-3
 
     def modified_convergence_criteria(
-        vec0, vec1, system_evaluation, convergence_criteria
+        step, system_evaluation, convergence_criteria
     ):
-        if vec0 is None:
-            return False
-        return convergence_criteria(vec0, vec1, system_evaluation)
+        return convergence_criteria(step, system_evaluation)
 
     def new_print(*args):
         if not silent:
             print(*args)
 
     # Solve
-    i, last_step, this_step = 0, None, starter
+    i, step, soln = 0, np.inf, starter
     while not modified_convergence_criteria(
-        last_step, this_step, system(this_step), convergence_criteria
+        step, system(soln), convergence_criteria
     ):
-        if i > max_iter:
-            return None
-        last_step = this_step
-        jacobian = jacobian_func(this_step)
-        step = np.linalg.solve(jacobian, -system(this_step))
-        this_step += step
+        if i >= max_iter:
+            return None if hardstop else soln
+        jacobian = jacobian_func(soln)
+        step = np.linalg.solve(jacobian, -system(soln))
+        soln += step
         i += 1
         new_print("Solver iteration ", i)
-        new_print("Jacobian:\n", jacobian)
         new_print("\nJacobian condition number: ", np.linalg.cond(jacobian), "\n")
-        new_print("\nNew continuation vector:\n", this_step)
-        new_print("\nSystem evaluation:\n", system(this_step), "\n")
-    new_print("Converged in {0} step(s)".format(i))
+        new_print("\nNew continuation vector:\n", soln)
+        new_print("\nSystem evaluation:\n", system(soln), "\n")
+    new_print("Terminated in {0} step(s)".format(i))
     new_print("\n\n")
-    return this_step
+    return soln
 
 
 class Continuation(abc.ABC):
