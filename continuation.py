@@ -14,11 +14,23 @@ GOAL: scripts for continuing periodic orbits in a controlled system.
    * DOES NOT allow different augmentations, eg. to track folds
 
 TODOs
-   * Autonymous continuation is untested; give it a go!
-   * Eventually, build into cbc_lib, to make it easier to define systems and controllers
-   * Replace the solver with something more portable, eg. more standard max_iter, convergence_criteria
-   * Simplify API -- make it easier to set up and run the code
+   * Make a separate solvers package, with Newton, Broyden, SciPy, (adaptive Newton?); different convergence criteria; different Jacobian estimations; so that solvers can be easily mixed and matched.
+   * Move Continuation class, collocation classes into a separate Continuation Core package
+     * Have this as a continuation-runners class (for numerical, cbc, eventually EPC)
+   * Some docs on how to use each continuation driver
 """
+
+
+def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
+    if np.isscalar(stepsize):
+        stepsize = stepsize * np.ones(x.shape)
+    perturbations = np.diag(stepsize)
+    if central:
+        jac_transpose = [(f(x + h) - f(x - h)) / (2 * np.max(h)) for h in perturbations]
+    else:
+        f_x = f(x)
+        jac_transpose = [(f(x + h) - f_x) / np.max(h) for h in perturbations]
+    return np.array(jac_transpose).T
 
 
 def newton_solver(
@@ -54,6 +66,7 @@ def newton_solver(
         if i >= max_iter:
             return None if hardstop else soln
         jacobian = jacobian_func(soln)
+        ### jacobian = finite_differences_jacobian(system, soln, finite_differences_stepsize)
         step = np.linalg.solve(jacobian, -system(soln))
         soln += step
         i += 1
