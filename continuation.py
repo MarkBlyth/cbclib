@@ -130,30 +130,6 @@ class Continuation(abc.ABC):
     METHODS, HELPERS USED TO RUN A CONTINUATION PROBLEM.
     """
 
-    def _modified_convergence_criteria(
-        self, vec0, vec1, system_evaluation, convergence_criteria
-    ):
-        """
-        Override the provided convergence_criteria function so that it
-        returns False on the first step. This allows the solver to
-        avoid converging on the very first iteration.
-
-            vec0 : continuation vector
-                Previous iteration vector.
-
-            vec1 : continuation vector
-                Current iteration vector.
-
-            convergence_criteria : function
-                Function of signature func(v0, v1). Returns True if
-                the solver iteration scheme has converged, based on
-                the current and previous solution estimates. False
-                otherwise.
-        """
-        if vec0 is None:
-            return False
-        return convergence_criteria(vec0, vec1, system_evaluation)
-
     def _prediction_correction_step(
         self, y0, y1, stepsize, solver=newton_solver,
     ):
