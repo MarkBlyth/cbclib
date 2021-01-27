@@ -82,12 +82,6 @@ def get_analytic_amplitude(
     ).root
 
 
-def convergence_criteria(y0, y1, system_evaluation):
-    """ TODO comments """
-    return np.linalg.norm(y1 - y0) < 1e-9
-    # return np.linalg.norm(system_evaluation) < 5e-2
-
-
 def build_continuation_vector(signal, discretisor, parameter):
     """ TODO comments """
     period = 2 * np.pi / parameter
