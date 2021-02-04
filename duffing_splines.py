@@ -104,7 +104,7 @@ def get_amplitude(discretisation, discretisor):
     return (np.max(ys) - np.min(ys)) / 2
 
 
-class DuffingContinuation(continuation.ControlBasedContinuation):
+class DuffingContinuation(continuation.AutonymousCBC):
     def get_period(self, continuation_vec):
         return 2 * np.pi / continuation_vec[0]
 

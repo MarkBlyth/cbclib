@@ -81,7 +81,7 @@ def get_amplitude(discretisation):
     return f0_amplitude
 
 
-class DuffingContinuation(continuation.ControlBasedContinuation):
+class DuffingContinuation(continuation.AutonymousCBC):
     """ TODO comments """
 
     def get_period(self, continuation_vec):

@@ -36,18 +36,19 @@ def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
 def newton_solver(
     system,
     starter,
-    max_iter=1,
+    max_iter=5,
     finite_differences_stepsize=None,
     convergence_criteria=None,
     silent=False,
     hardstop=False,  ### If true, return None to indicate convergence failure when max_iter is exceeded; if false, return whatever solution we have after max_iter
 ):
-    jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
+    ###jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
+    jacobian_func = lambda x: finite_differences_jacobian(system, x, finite_differences_stepsize)
 
     if convergence_criteria is None:
 
         def convergence_criteria(step, system_evaluation):
-            return np.linalg.norm(step) < 1e-3
+            return np.linalg.norm(system_evaluation) < 5e-3
 
     def modified_convergence_criteria(
         step, system_evaluation, convergence_criteria
@@ -66,7 +67,6 @@ def newton_solver(
         if i >= max_iter:
             return None if hardstop else soln
         jacobian = jacobian_func(soln)
-        ### jacobian = finite_differences_jacobian(system, soln, finite_differences_stepsize)
         step = np.linalg.solve(jacobian, -system(soln))
         soln += step
         i += 1
@@ -392,29 +392,7 @@ class Continuation(abc.ABC):
         pass
 
 
-class ControlBasedContinuation(Continuation):
-    """
-    TODO how does the user do something with this? What does the constructor look like? How do they initialise? Which abstract methods need implementing?
-    
-
-            continuation_target : function(control target, system parameter)
-                Something resembling a physical system. Given only a
-                control target and a system parameter, it returns a signal
-                of form [[signal ts], [signal ys]]. The exact method for
-                doing this is left to the system implementer. It is
-                suggested that the system uses the previous run's
-                end-state as the initial conditions for the next run; that
-                the system integrates out and omits all transients; that
-                the system ensures a sufficiently long integration time to
-                fully represent the signal, eg. sufficient periods.
-    """
-
-    def get_parameter(self, continuation_vec):
-        return continuation_vec[0]
-
-    def get_discretisation(self, continuation_vec):
-        return continuation_vec[1:]
-
+class CBC(Continuation):
     def _continuation_system(
         self, continuation_vector, last_solution, prediction, secant
     ):
@@ -492,3 +470,62 @@ class ControlBasedContinuation(Continuation):
         parameter = self.get_parameter(continuation_vector)
         control_target = self.discretisor.undiscretise(discretisation, period)
         return self.continuation_target(control_target, parameter)
+
+
+class AutonymousCBC(CBC):
+    """
+    TODO how does the user do something with this? What does the constructor look like? How do they initialise? Which abstract methods need implementing?
+
+
+            continuation_target : function(control target, system parameter)
+                Something resembling a physical system. Given only a
+                control target and a system parameter, it returns a signal
+                of form [[signal ts], [signal ys]]. The exact method for
+                doing this is left to the system implementer. It is
+                suggested that the system uses the previous run's
+                end-state as the initial conditions for the next run; that
+                the system integrates out and omits all transients; that
+                the system ensures a sufficiently long integration time to
+                fully represent the signal, eg. sufficient periods.
+    """
+    def __init__(self, continuation_target, discretisor):
+        super().__init__(continuation_target, discretisor, False)
+
+    @abc.abstractmethod
+    def get_period(self, continuation_vec):
+        """ Implemented by the user """
+        pass
+
+    def get_parameter(self, continuation_vec):
+        return continuation_vec[0]
+
+    def get_discretisation(self, continuation_vec):
+        return continuation_vec[1:]
+
+
+class NonautonymousCBC(CBC):
+    ##### TODO remove references to default_phase_condition
+
+    def __init__(self, continuation_target, discretisor):
+        self.continuation_target = continuation_target
+        self.discretisor = discretisor
+
+    def phase_condition(self, current_vec, last_vec):
+        current_model = self.discretisor.undiscretise(
+            self.get_discretisation(current_vec), 1
+        )
+        reference_gradient = self.discretisor.derivative_undiscretise(
+            self.get_discretisation(last_vec), 1
+        )
+        return scipy.integrate.quad(
+            lambda t: np.inner(current_model(t), reference_gradient(t)), 0, 1, limit=250,
+        )[0]
+
+    def get_parameter(self, continuation_vec):
+        return continuation_vec[0]
+
+    def get_period(self, continuation_vec):
+        return continuation_vec[1]
+
+    def get_discretisation(self, continuation_vec):
+        return continuation_vec[2:]

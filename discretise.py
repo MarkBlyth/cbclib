@@ -2,13 +2,14 @@ import abc
 import numpy as np
 import scipy.interpolate
 import splines
+import copy
 
 """
 TODOs:
+    * Add a get-time-derivative-of-signal-from-its-discretisation sort of function for use with phase constraints
     * README
     * Robustness / error checking
     * Test the adaptive discretisor; it'll probably have issues with knots producing invalid splines curves, when there aren't enough data to fit from; this is an issue with splines.py
-    * Unit tests
 """
 
 
@@ -66,6 +67,26 @@ class _Discretisor(abc.ABC):
 
         Returns a function of signature model(ts), which gives the
         signal value at times ts.
+        """
+        pass
+
+    @abc.abstractmethod
+    def derivative_undiscretise(self, discretisation, period):
+        """
+        Take a discretisation of a signal, and the period of the
+        original signal. Produce an evaluable model to represent the
+        time-derivative of the signal described in the discretisation.
+
+            discretisation : 1-by-n float array
+                Some discretisation, eg. that returned by
+                self.discretise, or as computed by a Newton update in
+                a continuation routine.
+
+            period : float > 0
+                The desired period of the undiscretised signal.
+
+        Returns a function of signature model(ts), which gives the
+        time-derivative of the signal value at times ts.
         """
         pass
 
@@ -209,6 +230,20 @@ class FourierDiscretisor(_Discretisor):
 
         return deparameterized
 
+    def derivative_undiscretise(self, discretisation, period):
+        discretisation = copy.deepcopy(discretisation)
+        a0, ai, bi = (
+            discretisation[0],
+            discretisation[1:self.dsize+1],
+            discretisation[self.dsize + 1:],
+        )
+        ns = np.arange(ai.size) + 1
+        a0 = 0
+        ai = ns * bi * 2 * np.pi / period
+        bi = - ns * ai * 2 * np.pi / period
+        return self.undiscretise(np.hstack((a0, ai, bi)), period)
+
+
 
 class SplinesDiscretisor(_Discretisor):
     """
@@ -231,6 +266,9 @@ class SplinesDiscretisor(_Discretisor):
 
     def undiscretise(self, discretisation, period):
         return lambda ts: self._spline(ts, discretisation, period)
+
+    def derivative_undiscretise(self, discretisation, period):
+        return lambda ts: self._spline.derivative(ts, discretisation, period)
 
 
 class AdaptiveSplinesDiscretisor(_AdaptiveDiscretisor):
