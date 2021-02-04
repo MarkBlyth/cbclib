@@ -4,6 +4,7 @@ import discretise
 import copy
 import numdifftools as ndt
 import scipy.integrate
+import collections
 
 """
 GOAL: scripts for continuing periodic orbits in a controlled system.
@@ -15,10 +16,17 @@ GOAL: scripts for continuing periodic orbits in a controlled system.
 
 TODOs
    * Make a separate solvers package, with Newton, Broyden, SciPy, (adaptive Newton?); different convergence criteria; different Jacobian estimations; so that solvers can be easily mixed and matched.
+   * Add f_eval, n_fev, and other interesting solver data into its return (maybe make a solver solution class?)
+   * Store all the nice solver data in the ContinuationSolution
    * Move Continuation class, collocation classes into a separate Continuation Core package
      * Have this as a continuation-runners class (for numerical, cbc, eventually EPC)
    * Some docs on how to use each continuation driver
 """
+
+ContinuationSolution = collections.namedtuple(
+    "ContinuationSolution",
+    "vector, parameter, period, discretisation, control_target, discretisor",
+)
 
 
 def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
@@ -163,7 +171,8 @@ class Continuation(abc.ABC):
         bound_continuation_system = lambda y_in: self._continuation_system(
             y_in, y1, prediction, secant
         )
-        return solver(bound_continuation_system, prediction)
+        solution = solver(bound_continuation_system, prediction)
+        return self._construct_continuation_result(solution)
 
     def run_continuation(
         self,
@@ -210,37 +219,40 @@ class Continuation(abc.ABC):
         """
         message = None
         # Initialise the first results in the continuation, for secant prediction
-        solution_vecs = [copy.deepcopy(s) for s in starters]
+        solutions = [self._construct_continuation_result(s) for s in starters]
         # Can exit the continuation steps with CTRL-C
         try:
             for i in range(n_steps):
                 # Keep stepping until an exit criterion is met
                 print("Step {0}".format(i + 1))
-                new_vec = self._prediction_correction_step(
-                    solution_vecs[-2], solution_vecs[-1], stepsize, solver,
+                new_soln = self._prediction_correction_step(
+                    solutions[-2].vector,
+                    solutions[-1].vector,
+                    stepsize,
+                    solver,
                 )
-                if new_vec is None:
+                if new_soln is None:
                     message = "Continuation terminated as last correction step did not converge"
                     break
-                solution_vecs.append(new_vec)
+                solutions.append(new_soln)
                 try:
                     if isinstance(self.discretisor, discretise._AdaptiveDiscretisor):
                         self.discretisor.update_discretisation_scheme(
                             self._evaluate_system_from_continuation_vector(
-                                solution_vecs[-1]
+                                solutions[-1].vector
                             ),
-                            self.get_period(solution_vecs[-1]),
+                            solutions[-1].period,
                         )
                 except AttributeError:
                     # TODO add support for adaptive-mesh collocation
                     pass
                 # Exit criteria:
-                if (self.get_parameter(solution_vecs[-1]) > max(par_range)) or (
-                    self.get_parameter(solution_vecs[-1]) < min(par_range)
+                if (solutions[-1].parameter > max(par_range)) or (
+                    solutions[-1].parameter < min(par_range)
                 ):
                     message = "Continuation terminated as parameter left target range"
                     break
-                if self.get_period(solution_vecs[-1]) > max_period:
+                if solutions[-1].period > max_period:
                     message = "Continuation terminated as period exceeded maximum value"
                     break
             if message is None:
@@ -248,7 +260,7 @@ class Continuation(abc.ABC):
         except KeyboardInterrupt:
             # Can exit the continuation steps with CTRL-C
             message = "Continuation terminated though keyboard interrupt"
-        return solution_vecs, message
+        return solutions, message
 
     def __no_phase_condition(self, last_vec, current_vec):
         """
@@ -291,6 +303,19 @@ class Continuation(abc.ABC):
         return scipy.integrate.quad(
             lambda t: np.inner(current_model(t), reference_gradient(t)), 0, 1
         )[0]
+
+    def _construct_continuation_result(self, accepted_solution):
+        discretisor = copy.deepcopy(self.discretisor)
+        discretisation = self.get_discretisation(accepted_solution)
+        period = self.get_parameter(accepted_solution)
+        return ContinuationSolution(
+            accepted_solution,
+            period,
+            self.get_period(accepted_solution),
+            discretisation,
+            discretisor.undiscretise(discretisation, period),
+            discretisor,
+        )
 
     """
     METHOD SET BY THE SPECIFIC CONTINUATION SCHEME.
