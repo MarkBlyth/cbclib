@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import continuation
 import discretise
 
-STARTER_PARAMS = [(0.5, 0.51)]  # [(2.0, 1.99)]  # [(0.5, 0.51), (2.0, 1.99)]
+STARTER_PARAMS = [0.5, 0.51]
 N_HARMONICS = 3
 KP = 1
 INTEGRATION_TIME = 30
@@ -67,10 +67,10 @@ def build_continuation_vector(signal, discretisor, parameter):
     return np.hstack((parameter, discretisation))
 
 
-def get_amplitude(discretisation):
+def get_amplitude(continuation_solution):
     """ TODO comments """
-    a1 = discretisation[1]
-    b1 = discretisation[(len(discretisation) + 1) // 2]
+    a1 = continuation_solution.discretisation[1]
+    b1 = continuation_solution.discretisation[(len(continuation_solution.discretisation) + 1) // 2]
     f0_amplitude = np.sqrt(a1 ** 2 + b1 ** 2)
     return f0_amplitude
 
@@ -85,35 +85,31 @@ class DuffingContinuation(continuation.AutonymousCBC):
 def main():
     discretisor = discretise.FourierDiscretisor(N_HARMONICS)
     continuer = DuffingContinuation(blackbox_system, discretisor)
-    results = []
 
-    for par_0, par_1 in STARTER_PARAMS:
-        # Run forward, then backward
-        signal_0 = blackbox_system(None, par_0)
-        signal_1 = blackbox_system(None, par_1)
-        starters = [
-            build_continuation_vector(signal_0, discretisor, par_0),
-            build_continuation_vector(signal_1, discretisor, par_1),
-        ]
+    par_0, par_1 = STARTER_PARAMS
+    signal_0 = blackbox_system(None, par_0)
+    signal_1 = blackbox_system(None, par_1)
+    starters = [
+        build_continuation_vector(signal_0, discretisor, par_0),
+        build_continuation_vector(signal_1, discretisor, par_1),
+    ]
 
-        solver = lambda sys, x0: continuation.newton_solver(
-            sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
-        )
-        continuation_vectors, message = continuer.run_continuation(
-            starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
-        )
-        print(message)
-        results.append(continuation_vectors)
+    solver = lambda sys, x0: continuation.newton_solver(
+        sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
+    )
+    continuation_solutions, message = continuer.run_continuation(
+        starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
+    )
+    print(message)
 
         # Plot results
     fig, ax = plt.subplots()
-    for vec_list in results:
-        ax.plot(
-            [continuer.get_parameter(v) for v in vec_list],
-            [get_amplitude(continuer.get_discretisation(v)) for v in vec_list],
-            color="k",
-        )
-    ax.set_xlabel("Forcing amplitude")
+    ax.plot(
+        [s.parameter for s in continuation_solutions],
+        [get_amplitude(s) for s in continuation_solutions],
+        color="k",
+    )
+    ax.set_xlabel("Forcing frequency")
     ax.set_ylabel("Response amplitude")
     plt.show()
 

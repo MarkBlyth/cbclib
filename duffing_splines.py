@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import continuation
 import discretise
 
-STARTER_PARAMS = [(0.5, 0.51)]
+STARTER_PARAMS = [0.5, 0.51]
 KP = 1
 INTEGRATION_TIME = 30
 TRANSIENT_TIME = 100
@@ -89,18 +89,17 @@ def build_continuation_vector(signal, discretisor, parameter):
     return np.hstack((parameter, discretisation))
 
 
-def get_amplitude(discretisation, discretisor):
+def get_amplitude(solution):
     """
     Calculate a loose estimate of the signal amplitude. Evaluate the
     undiscretised model at 1000 test points; find the maximum and
     minimum evaluations; return the difference between them. This is
     not an exact amplitude, as there is no guarantee the tested
     timepoints will line up with the maxima and minima; nevertheless,
-    it will give a good estimate.
+    it will give a very good estimate.
     """
-    model = discretisor.undiscretise(discretisation, 1)
-    ts = np.linspace(0, 1, 1000)
-    ys = model(ts)
+    ts = np.linspace(0, solution.period/2, 1000)
+    ys = solution.control_target(ts)
     return (np.max(ys) - np.min(ys)) / 2
 
 
@@ -110,7 +109,6 @@ class DuffingContinuation(continuation.AutonymousCBC):
 
 
 def main():
-    results = []
     solver = lambda sys, x0: continuation.newton_solver(
         sys, x0, finite_differences_stepsize=FINITE_DIFFERENCES_STEPSIZE
     )
@@ -125,29 +123,25 @@ def main():
     #         return solution.x
     #     return None
 
-    for par_0, par_1 in STARTER_PARAMS:
-        signal_0 = blackbox_system(None, par_0)
-        signal_1 = blackbox_system(None, par_1)
-        # Discretisation size, initial signal, period of initial signal
-        discretisor = discretise.SplinesDiscretisor(DSIZE)
-        starters = [
-            build_continuation_vector(signal_0, discretisor, par_0),
-            build_continuation_vector(signal_1, discretisor, par_1),
-        ]
-        continuer = DuffingContinuation(blackbox_system, discretisor)
+    par_0, par_1 = STARTER_PARAMS
+    signal_0 = blackbox_system(None, par_0)
+    signal_1 = blackbox_system(None, par_1)
+    # Discretisation size, initial signal, period of initial signal
+    discretisor = discretise.SplinesDiscretisor(DSIZE)
+    starters = [
+        build_continuation_vector(signal_0, discretisor, par_0),
+        build_continuation_vector(signal_1, discretisor, par_1),
+    ]
+    continuer = DuffingContinuation(blackbox_system, discretisor)
 
-        continuation_vectors, message = continuer.run_continuation(
-            starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
-        )
-        print(message)
-        results.append(continuation_vectors)
+    continuation_solutions, message = continuer.run_continuation(
+        starters, solver=solver, stepsize=STEPSIZE, par_range=[0.5, 2]
+    )
+    print(message)
 
     # Parse output
-    parameter_points = [continuer.get_parameter(v) for v in continuation_vectors]
-    cbc_amplitudes = [
-        get_amplitude(continuer.get_discretisation(v), discretisor)
-        for v in continuation_vectors
-    ]
+    parameter_points = [s.parameter for s in continuation_solutions]
+    cbc_amplitudes = [get_amplitude(s) for s in continuation_solutions]
     analytic_amplitudes = [
         get_analytic_amplitude(a, w) for a, w in zip(cbc_amplitudes, parameter_points)
     ]
@@ -155,7 +149,7 @@ def main():
     # Plot results
     fig, ax = plt.subplots()
     ax.plot(parameter_points, cbc_amplitudes, color="k")
-    ax.set_xlabel("Forcing amplitude")
+    ax.set_xlabel("Forcing frequency")
     ax.set_ylabel("Response amplitude")
     plt.show()
 
