@@ -51,16 +51,16 @@ def newton_solver(
     hardstop=False,  ### If true, return None to indicate convergence failure when max_iter is exceeded; if false, return whatever solution we have after max_iter
 ):
     ###jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
-    jacobian_func = lambda x: finite_differences_jacobian(system, x, finite_differences_stepsize)
+    jacobian_func = lambda x: finite_differences_jacobian(
+        system, x, finite_differences_stepsize
+    )
 
     if convergence_criteria is None:
 
         def convergence_criteria(step, system_evaluation):
             return np.linalg.norm(system_evaluation) < 5e-3
 
-    def modified_convergence_criteria(
-        step, system_evaluation, convergence_criteria
-    ):
+    def modified_convergence_criteria(step, system_evaluation, convergence_criteria):
         return convergence_criteria(step, system_evaluation)
 
     def new_print(*args):
@@ -69,9 +69,7 @@ def newton_solver(
 
     # Solve
     i, step, soln = 0, np.inf, starter
-    while not modified_convergence_criteria(
-        step, system(soln), convergence_criteria
-    ):
+    while not modified_convergence_criteria(step, system(soln), convergence_criteria):
         if i >= max_iter:
             return None if hardstop else soln
         jacobian = jacobian_func(soln)
@@ -139,7 +137,11 @@ class Continuation(abc.ABC):
     """
 
     def _prediction_correction_step(
-        self, y0, y1, stepsize, solver=newton_solver,
+        self,
+        y0,
+        y1,
+        stepsize,
+        solver=newton_solver,
     ):
         """
         Perform a predictor-corrector step using the psuedo-arclength
@@ -513,6 +515,7 @@ class AutonymousCBC(CBC):
                 the system ensures a sufficiently long integration time to
                 fully represent the signal, eg. sufficient periods.
     """
+
     def __init__(self, continuation_target, discretisor):
         super().__init__(continuation_target, discretisor, False)
 
@@ -543,7 +546,10 @@ class NonautonymousCBC(CBC):
             self.get_discretisation(last_vec), 1
         )
         return scipy.integrate.quad(
-            lambda t: np.inner(current_model(t), reference_gradient(t)), 0, 1, limit=250,
+            lambda t: np.inner(current_model(t), reference_gradient(t)),
+            0,
+            1,
+            limit=250,
         )[0]
 
     def get_parameter(self, continuation_vec):
