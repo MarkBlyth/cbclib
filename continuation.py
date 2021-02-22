@@ -23,6 +23,9 @@ TODOs
    * Some docs on how to use each continuation driver
 """
 
+
+N_UPDATE_POINTS = 1000  # Number of timepoint samples to use when simulating a control target to re-discretise under a new discretisation scheme
+
 ContinuationSolution = collections.namedtuple(
     "ContinuationSolution",
     "vector, parameter, period, discretisation, control_target, discretisor",
@@ -131,6 +134,9 @@ class Continuation(abc.ABC):
             )
         else:
             self.phase_condition = autonymous
+        self.discretisor_is_adaptive = isinstance(
+            self.discretisor, discretise._AdaptiveDiscretisor
+        )
 
     """
     METHODS, HELPERS USED TO RUN A CONTINUATION PROBLEM.
@@ -170,11 +176,12 @@ class Continuation(abc.ABC):
         # Predict
         secant = (y1 - y0) / np.linalg.norm(y1 - y0)
         prediction = y1 + stepsize * secant
+
         bound_continuation_system = lambda y_in: self._continuation_system(
             y_in, y1, prediction, secant
         )
         solution = solver(bound_continuation_system, prediction)
-        return self._construct_continuation_result(solution)
+        return None if solution is None else self._construct_continuation_result(solution)
 
     def run_continuation(
         self,
@@ -227,22 +234,25 @@ class Continuation(abc.ABC):
             for i in range(n_steps):
                 # Keep stepping until an exit criterion is met
                 print("Step {0}".format(i + 1))
+                if self.discretisor_is_adaptive:
+                    soln1 = self._update_solution_to_new_discretisor(solutions[-2])
+                    soln2 = self._update_solution_to_new_discretisor(solutions[-1])
+                else:
+                    soln1 = solutions[-2].vector
+                    soln2 = solutions[-1].vector
                 new_soln = self._prediction_correction_step(
-                    solutions[-2].vector,
-                    solutions[-1].vector,
-                    stepsize,
-                    solver,
+                    soln1, soln2, stepsize, solver
                 )
                 if new_soln is None:
                     message = "Continuation terminated as last correction step did not converge"
                     break
                 solutions.append(new_soln)
                 try:
-                    if isinstance(self.discretisor, discretise._AdaptiveDiscretisor):
+                    if self.discretisor_is_adaptive:
+                        ts = np.linspace(0, solutions[-1].period, N_UPDATE_POINTS)
+                        ys = solutions[-1].control_target(ts)
                         self.discretisor.update_discretisation_scheme(
-                            self._evaluate_system_from_continuation_vector(
-                                solutions[-1].vector
-                            ),
+                            np.vstack((ts, ys)),
                             solutions[-1].period,
                         )
                 except AttributeError:
@@ -263,6 +273,16 @@ class Continuation(abc.ABC):
             # Can exit the continuation steps with CTRL-C
             message = "Continuation terminated though keyboard interrupt"
         return solutions, message
+
+    def _update_solution_to_new_discretisor(self, solution):
+        """
+        TODO docstring
+        """
+        ts = np.linspace(0, solution.period, N_UPDATE_POINTS)
+        ys = solution.control_target(ts)
+        signal = np.vstack((ts, ys))
+        new_discretisation = self.discretisor.discretise(signal, solution.period)
+        return self.build_vector(solution.parameter, solution.period, new_discretisation)
 
     def __no_phase_condition(self, last_vec, current_vec):
         """
@@ -309,11 +329,11 @@ class Continuation(abc.ABC):
     def _construct_continuation_result(self, accepted_solution):
         discretisor = copy.deepcopy(self.discretisor)
         discretisation = self.get_discretisation(accepted_solution)
-        period = self.get_parameter(accepted_solution)
+        period = self.get_period(accepted_solution)
         return ContinuationSolution(
             accepted_solution,
+            self.get_parameter(accepted_solution),
             period,
-            self.get_period(accepted_solution),
             discretisation,
             discretisor.undiscretise(discretisation, period),
             discretisor,
@@ -373,6 +393,14 @@ class Continuation(abc.ABC):
                 solutions.
 
         Returns an evaluation of the zero-problem.
+        """
+        pass
+
+    @abc.abstractmethod
+    def build_vector(self, parameter, period, discretisation):
+        """
+        Given a set of data, turn them into an appropriately formatted
+        continuation vector. Returns a continuation vector
         """
         pass
 
@@ -524,6 +552,9 @@ class AutonymousCBC(CBC):
         """ Implemented by the user """
         pass
 
+    def build_vector(self, parameter, period, discretisation):
+        return np.hstack((parameter, discretisation))
+
     def get_parameter(self, continuation_vec):
         return continuation_vec[0]
 
@@ -535,8 +566,7 @@ class NonautonymousCBC(CBC):
     ##### TODO remove references to default_phase_condition
 
     def __init__(self, continuation_target, discretisor):
-        self.continuation_target = continuation_target
-        self.discretisor = discretisor
+        super().__init__(continuation_target, discretisor, self.phase_condition)
 
     def phase_condition(self, current_vec, last_vec):
         current_model = self.discretisor.undiscretise(
@@ -551,6 +581,9 @@ class NonautonymousCBC(CBC):
             1,
             limit=250,
         )[0]
+
+    def build_vector(self, parameter, period, discretisation):
+        return np.hstack((parameter, period, discretisation))
 
     def get_parameter(self, continuation_vec):
         return continuation_vec[0]
