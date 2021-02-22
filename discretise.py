@@ -1,6 +1,7 @@
 import abc
 import numpy as np
 import scipy.interpolate
+import scipy.stats
 import splines
 import copy
 
@@ -278,7 +279,10 @@ class AdaptiveSplinesDiscretisor(_AdaptiveDiscretisor):
     def undiscretise(self, discretisation, period):
         return lambda ts: self._spline(ts, discretisation, period)
 
-    def _initialise_discretisation_scheme(self, signal, period, n_tries=50):
+    def derivative_undiscretise(self, discretisation, period):
+        return lambda ts: self._spline.derivative(ts, discretisation, period)
+
+    def _initialise_discretisation_scheme(self, signal, period, n_tries=10):
         """
         Given some periodic data, find the set of interior knots that
         provide a best-possible periodic splines model to the data (in
@@ -305,9 +309,10 @@ class AdaptiveSplinesDiscretisor(_AdaptiveDiscretisor):
         lowest-residual splines fit to the provided data.
         """
         def loss(interior_knots):
-            # Prediction error under current knots
+            # Training error under current knots
             spline = splines.PeriodicSpline(np.sort(interior_knots))
-            residuals = signal[1] - spline(signal[0])
+            coeffs = spline.fit(signal[0], signal[1], period)
+            residuals = signal[1] - spline(signal[0], coeffs, period)
             return np.linalg.norm(residuals) ** 2
 
         # Uniform distribution for initial knots
@@ -316,13 +321,17 @@ class AdaptiveSplinesDiscretisor(_AdaptiveDiscretisor):
         # Keep re-optimizing; store best result
         best_loss = np.inf
         best_knots = None
+        bounds = scipy.optimize.Bounds(0, 1)
         for k in initial_knots:
-            opti = scipy.optimize.minimize(loss, k, tol=1e-3)
+            opti = scipy.optimize.minimize(loss, k, bounds=bounds)
+            print("Proposed knots: \n", np.sort(opti.x))
+            print(opti, "\n")
             if opti.fun < best_loss:
                 best_loss = opti.fun
                 best_knots = opti.x
-        self._spline = splines.PeriodicSpline(np.sort(best_knots))
-        return np.sort(best_knots)
+        self.mesh = np.sort(best_knots)
+        self._spline = splines.PeriodicSpline(self.mesh)
+        return self.mesh
 
     def update_discretisation_scheme(self, signal, period):
         """
@@ -343,15 +352,19 @@ class AdaptiveSplinesDiscretisor(_AdaptiveDiscretisor):
         knots.
         """
         def loss(interior_knots):
-            # Prediction error under current knots
+            # Training error under current knots
             spline = splines.PeriodicSpline(np.sort(interior_knots))
-            residuals = signal[1] - spline(signal[0])
+            coeffs = spline.fit(signal[0], signal[1], period)
+            residuals = signal[1] - spline(signal[0], coeffs, period)
             return np.linalg.norm(residuals) ** 2
 
-        opti = scipy.optimize.minimize(loss, self.mesh)
+        bounds = scipy.optimize.Bounds(0, 1)
+        opti = scipy.optimize.minimize(loss, self.mesh, bounds=bounds)
         self.mesh = np.sort(opti.x)
         self._spline = splines.PeriodicSpline(self.mesh)
-        return opti.x
+        print("Proposed knots: \n", self.mesh)
+        print(opti, "\n")
+        return self.mesh
 
 
 def _get_full_knots(interior_knots):
