@@ -75,7 +75,7 @@ def get_amplitude(continuation_solution):
     return f0_amplitude
 
 
-class DuffingContinuation(continuation.AutonymousCBC):
+class DuffingContinuation(continuation.NonautonymousCBC):
     """ TODO comments """
 
     def get_period(self, continuation_vec):

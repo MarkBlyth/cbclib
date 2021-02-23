@@ -84,6 +84,7 @@ def get_analytic_amplitude(
 
 def build_continuation_vector(signal, discretisor, parameter):
     """ TODO comments """
+    # TODO replace this with the method defined in NonautonymousCBC
     period = 2 * np.pi / parameter
     discretisation = discretisor.discretise(signal, period)
     return np.hstack((parameter, discretisation))
@@ -103,7 +104,7 @@ def get_amplitude(solution):
     return (np.max(ys) - np.min(ys)) / 2
 
 
-class DuffingContinuation(continuation.AutonymousCBC):
+class DuffingContinuation(continuation.NonautonymousCBC):
     def get_period(self, continuation_vec):
         return 2 * np.pi / continuation_vec[0]
 

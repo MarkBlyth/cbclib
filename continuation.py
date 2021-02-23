@@ -527,7 +527,7 @@ class CBC(Continuation):
         return self.continuation_target(control_target, parameter)
 
 
-class AutonymousCBC(CBC):
+class NonautonymousCBC(CBC):
     """
     TODO how does the user do something with this? What does the constructor look like? How do they initialise? Which abstract methods need implementing?
 
@@ -562,7 +562,7 @@ class AutonymousCBC(CBC):
         return continuation_vec[1:]
 
 
-class NonautonymousCBC(CBC):
+class AutonymousCBC(CBC):
     ##### TODO remove references to default_phase_condition
 
     def __init__(self, continuation_target, discretisor):
