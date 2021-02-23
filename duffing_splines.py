@@ -1,69 +1,37 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import scipy.integrate
 import scipy.optimize
-import scipy.interpolate
-import scipy.stats
 import scipy.misc
 import matplotlib.pyplot as plt
 import continuation
 import discretise
+import system
 
 STARTER_PARAMS = [0.5, 0.51]
 KP = 1
-INTEGRATION_TIME = 30
+EVALUATION_TIME = 30
 TRANSIENT_TIME = 100
-N_SAMPLES = INTEGRATION_TIME * 10
 ###
 DSIZE = 5
 STEPSIZE = 1
 FINITE_DIFFERENCES_STEPSIZE = 0.2
 
-
-# Things to do:
-# Understand why it's jumping!
-# Try different numerical solver?
-
-
-def blackbox_system(control_target, parameter):
-    """ TODO comments """
-
-    def duffing(x, t, omega, control_target, kp):
-        """Defines the RHS of the model"""
-        gamma = 1
-        alpha = 1
-        beta = 0.04
-        delta = 0.1
-        v, w = x  # Unpack state
-        if control_target is not None:
-            control_action = kp * (control_target(t) - v)
-        else:
-            control_action = 0
-        vdot = w
-        wdot = (
-            gamma * np.cos(omega * t)
-            - beta * v ** 3
-            - alpha * v
-            - delta * w
-            + control_action
-        )
-        return [vdot, wdot]
-
-    t_span = [0, TRANSIENT_TIME + INTEGRATION_TIME]
-    t_eval = np.linspace(TRANSIENT_TIME, TRANSIENT_TIME + INTEGRATION_TIME, N_SAMPLES)
-    if control_target is not None:
-        # Speed up transient decay
-        y0 = [control_target(0), control_target(0)]
-    else:
-        y0 = [1, 1]  # Arbitrarily
-    soln = scipy.integrate.solve_ivp(
-        lambda t, x: duffing(x, t, parameter, control_target, KP),
-        t_span=t_span,
-        t_eval=t_eval,
-        y0=y0,
+def duffing(t, x, omega):
+    """Defines the RHS of the model"""
+    gamma = 1
+    alpha = 1
+    beta = 0.04
+    delta = 0.1
+    v, w = x  # Unpack state
+    vdot = w
+    wdot = (
+        gamma * np.cos(omega * t)
+        - beta * v ** 3
+        - alpha * v
+        - delta * w
     )
-    return np.vstack((soln.t, soln.y[0]))
+    return [vdot, wdot]
 
 
 def get_analytic_amplitude(
@@ -124,9 +92,11 @@ def main():
     #         return solution.x
     #     return None
 
+    controller = system.ProportionalController(KP, [1, 0], [0, 1])
+    blackbox_system = system.System([1, 0], duffing, TRANSIENT_TIME, EVALUATION_TIME, 10, controller)
     par_0, par_1 = STARTER_PARAMS
-    signal_0 = blackbox_system(None, par_0)
-    signal_1 = blackbox_system(None, par_1)
+    signal_0 = blackbox_system(par_0)
+    signal_1 = blackbox_system(par_1)
     # Discretisation size, initial signal, period of initial signal
     discretisor = discretise.SplinesDiscretisor(DSIZE)
     starters = [

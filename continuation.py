@@ -101,15 +101,16 @@ class Continuation(abc.ABC):
         CBC. Requires a system to continue, a discretisation method,
         and optionally a phase condition.
 
-            continuation_target : function( [arg] , system parameter)
+            continuation_target : function( parameter, [args])
                 The system that we wish to perform numerical
                 continuation on. This could either be an ODE model, or
                 a physical system, depending on the type of
-                continuation in use. [arg] is some
+                continuation in use. [args] are some
                 implementation-dependent argument, such as initial
-                condition or control target. Returns a signal of form
-                [[signal ts], [signal ys]]. The exact method for doing
-                this is left to the system implementer.
+                condition or control target, and period. Returns a
+                signal of form [[signal ts], [signal ys]]. The exact
+                method for doing this is left to the system
+                implementer.
 
             discretisor : _Discretisor obj
                 Instantiation of a class implementing the _Discretisor
@@ -524,7 +525,7 @@ class CBC(Continuation):
         period = self.get_period(continuation_vector)
         parameter = self.get_parameter(continuation_vector)
         control_target = self.discretisor.undiscretise(discretisation, period)
-        return self.continuation_target(control_target, parameter)
+        return self.continuation_target(parameter, control_target, period)
 
 
 class NonautonymousCBC(CBC):
