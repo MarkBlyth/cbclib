@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import scipy.integrate
-import scipy.interpolate
-import scipy.stats
-import scipy.misc
 import matplotlib.pyplot as plt
 import continuation
 import discretise
+import system
 
 STARTER_PARAMS = [0.5, 0.51]
 N_HARMONICS = 3
@@ -15,7 +12,6 @@ KP = 1
 EVALUATION_TIME = 30
 TRANSIENT_TIME = 100
 ###
-N_SAMPLES = INTEGRATION_TIME * 10
 STEPSIZE = 0.2
 FINITE_DIFFERENCES_STEPSIZE = 0.1
 
