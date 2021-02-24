@@ -67,7 +67,7 @@ def get_amplitude(solution):
     timepoints will line up with the maxima and minima; nevertheless,
     it will give a very good estimate.
     """
-    ts = np.linspace(0, solution.period/2, 1000)
+    ts = np.linspace(0, solution.period, 1000)
     ys = solution.control_target(ts)
     return (np.max(ys) - np.min(ys)) / 2
 
