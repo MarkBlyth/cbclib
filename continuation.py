@@ -525,7 +525,7 @@ class CBC(Continuation):
         period = self.get_period(continuation_vector)
         parameter = self.get_parameter(continuation_vector)
         control_target = self.discretisor.undiscretise(discretisation, period)
-        return self.continuation_target(parameter, control_target, period)
+        return self.continuation_target(parameter, control_target, np.abs(period))
 
 
 class NonautonymousCBC(CBC):
