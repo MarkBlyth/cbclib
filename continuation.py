@@ -23,7 +23,6 @@ TODOs
    * Some docs on how to use each continuation driver
 """
 
-
 N_UPDATE_POINTS = 1000  # Number of timepoint samples to use when simulating a control target to re-discretise under a new discretisation scheme
 
 ContinuationSolution = collections.namedtuple(
@@ -32,14 +31,20 @@ ContinuationSolution = collections.namedtuple(
 )
 
 
-def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
+def finite_differences_jacobian(f, x, f_x=None, stepsize=1e-3, central=False):
+    """
+       f : func(x) whose derivative we want to find
+       x : the location at which to evaluate the derivative
+       f_x : optional; f(x), used for forward FD; computed if None
+       central : bool; if False, use forward FD; if True, use central
+    """
     if np.isscalar(stepsize):
         stepsize = stepsize * np.ones(x.shape)
     perturbations = np.diag(stepsize)
     if central:
         jac_transpose = [(f(x + h) - f(x - h)) / (2 * np.max(h)) for h in perturbations]
     else:
-        f_x = f(x)
+        f_x = f_x if f_x is not None else f(x)
         jac_transpose = [(f(x + h) - f_x) / np.max(h) for h in perturbations]
     return np.array(jac_transpose).T
 
@@ -47,21 +52,27 @@ def finite_differences_jacobian(f, x, stepsize=1e-3, central=False):
 def newton_solver(
     system,
     starter,
-    max_iter=5,
+    max_iter=20,
     finite_differences_stepsize=None,
     convergence_criteria=None,
     silent=False,
     hardstop=False,  ### If true, return None to indicate convergence failure when max_iter is exceeded; if false, return whatever solution we have after max_iter
 ):
-    ###jacobian_func = ndt.Jacobian(system, step=finite_differences_stepsize)
-    jacobian_func = lambda x: finite_differences_jacobian(
-        system, x, finite_differences_stepsize
+    """
+    TODO this shouldn't need hardstop. Instead, return a dict
+    containing soln, n_iter, f_eval, converged, and let the caller
+    decide whether they're happy to use the solution or not
+    """
+    # jacobian_obj = ndt.Jacobian(system, step=finite_differences_stepsize)
+    # jacobian_func = lambda x, f_x: jacobian_obj(x)
+    jacobian_func = lambda x, f_x: finite_differences_jacobian(
+        system, x, f_x, finite_differences_stepsize
     )
 
     if convergence_criteria is None:
 
         def convergence_criteria(step, system_evaluation):
-            return np.linalg.norm(system_evaluation) < 5e-3
+            return np.linalg.norm(system_evaluation) < 1e-3
 
     def modified_convergence_criteria(step, system_evaluation, convergence_criteria):
         return convergence_criteria(step, system_evaluation)
@@ -71,20 +82,28 @@ def newton_solver(
             print(*args)
 
     # Solve
-    i, step, soln = 0, np.inf, starter
-    while not modified_convergence_criteria(step, system(soln), convergence_criteria):
+    i, step, soln, system_evaluation = 0, np.inf, starter, None
+    while True:
+        # Check termination conditions. Doing it this way lets us run
+        # with the fewest possible function calls
         if i >= max_iter:
             return None if hardstop else soln
-        jacobian = jacobian_func(soln)
-        step = np.linalg.solve(jacobian, -system(soln))
+        if system_evaluation is None:
+            system_evaluation = system(soln)
+        if modified_convergence_criteria(step, system_evaluation, convergence_criteria):
+            break
+        # Haven't terminated, so update the solution
+        jacobian = jacobian_func(soln, system_evaluation)
+        step = np.linalg.solve(jacobian, -system_evaluation)
         soln += step
         i += 1
+        system_evaluation = system(soln)
+        # Print the results so far
         new_print("Solver iteration ", i)
-        new_print("\nJacobian condition number: ", np.linalg.cond(jacobian), "\n")
-        new_print("\nNew continuation vector:\n", soln)
-        new_print("\nSystem evaluation:\n", system(soln), "\n")
+        new_print("Jacobian condition number: ", np.linalg.cond(jacobian))
+        new_print("New continuation vector:\n", soln)
+        new_print("System evaluation:\n", system_evaluation, "\n")
     new_print("Terminated in {0} step(s)".format(i))
-    new_print("\n\n")
     return soln
 
 
