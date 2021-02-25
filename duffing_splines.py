@@ -13,9 +13,9 @@ KP = 1
 EVALUATION_TIME = 30
 TRANSIENT_TIME = 100
 ###
-DSIZE = 5
+DSIZE = 3
 STEPSIZE = 1
-FINITE_DIFFERENCES_STEPSIZE = 0.2
+FINITE_DIFFERENCES_STEPSIZE = 0.05
 
 def duffing(t, x, omega):
     """Defines the RHS of the model"""
